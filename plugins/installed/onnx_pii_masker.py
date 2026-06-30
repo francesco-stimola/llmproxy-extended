@@ -264,9 +264,11 @@ class OnnxPiiMasker(BasePlugin):
         if any_masked:
             ctx.metadata["pii_masked"] = True
             categories = ", ".join(sorted(counters.keys()))
+            self.logger.info(f"PII masked: [{categories}] — {len(counters)} category(ies)")
             await rotator._add_log(
                 f"ONNX PII Masker: masked [{categories}]", level="SYSTEM"
             )
             return PluginResponse.modify(body=body)
 
+        self.logger.debug("No PII detected in messages")
         return PluginResponse.passthrough()
