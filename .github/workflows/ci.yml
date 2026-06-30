@@ -118,12 +118,25 @@ jobs:
           fi
       - name: Check for blocked packages
         run: |
-          for pkg in litellm openai-proxy llm-proxy; do
+          # Blanket blocks (any version is forbidden)
+          for pkg in openai-proxy llm-proxy; do
             if pip show "$pkg" 2>/dev/null; then
               echo "CRITICAL: Blocked package $pkg is installed!"
               exit 1
             fi
           done
+          # Version-range block: litellm < 1.83.0 was compromised (2026-03-24 supply chain attack).
+          # litellm >= 1.83.0 is allowed as a transitive dependency of headroom-ai.
+          if pip show litellm 2>/dev/null; then
+            ver=$(pip show litellm | grep -i '^Version:' | awk '{print $2}')
+            IFS='.' read -r major minor patch <<< "$ver"
+            if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 83 ]; }; then
+              echo "CRITICAL: litellm==$ver is blocked (compromised release < 1.83.0)!"
+              exit 1
+            else
+              echo "litellm==$ver is allowed (>= 1.83.0, post-incident clean release)."
+            fi
+          fi
           echo "No blocked packages found."
 
   test:
