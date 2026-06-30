@@ -20,7 +20,7 @@ plugins:
     enabled: true
     version: "1.0.0"
     entrypoint: "default.cache_check:lookup"
-    timeout_ms: 10
+    timeout_ms: 50
 
   - name: "Smart Router"
     hook: "routing"
@@ -181,13 +181,13 @@ plugins:
   - name: "Headroom Compressor"
     hook: "pre_flight"
     priority: 25
-    enabled: false
+    enabled: true
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.headroom_compressor:HeadroomCompressor"
-    version: "1.0.0"
+    version: "1.1.0"
     author: "llmproxy-extended"
-    description: "Context compression via Headroom (60-95% token reduction). Runs after ONNX PII masking. Requires: pip install headroom[ml]"
+    description: "Context compression via headroom-ai (60-95% token reduction). Runs after ONNX PII masking. Requires: pip install headroom-ai[ml,code]"
     timeout_ms: 10000
     config:
       min_tokens_to_compress: 200

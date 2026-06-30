@@ -61,8 +61,8 @@ tokenizers>=0.19.0
 # onnxruntime-directml
 
 # Optional: Context compression — 60-95% token reduction (llmproxy-extended)
-# pip install headroom[ml]
-# headroom
+# pip install "headroom-ai[ml,code]"
+# headroom-ai[ml,code]
 
 # Optional: WASM plugin support
 # extism

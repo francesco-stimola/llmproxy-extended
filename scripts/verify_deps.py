@@ -27,20 +27,44 @@ import sys
 import importlib.metadata
 import pathlib
 import logging
+from typing import Callable
 
 logger = logging.getLogger("llmproxy.verify_deps")
 
-# Packages that MUST NOT be installed (known-compromised or dangerous in proxy context)
+# Packages that MUST NOT be installed (typosquats and permanently-dangerous names).
 BLOCKED_PACKAGES = {
-    "litellm",  # Supply chain attack 2026-03-24
     "openai-proxy",  # Typosquat risk
     "llm-proxy",  # Typosquat risk
+}
+
+# Version-range blocks for packages whose threat was version-specific.
+# Each entry: pkg_name → (predicate(version_str) → bool, reason_str)
+# The predicate returns True when the installed version is BLOCKED.
+#
+# litellm 1.82.8 (2026-03-24): compromised PyPI release planted litellm_init.pth
+# that harvested credentials and exfiltrated via RSA-encrypted POST.
+# Versions >= 1.83.0 were released clean after the incident was patched.
+# litellm >= 1.83.0 is required as a transitive dependency of headroom-ai.
+def _parse_ver(v: str) -> tuple[int, ...]:
+    """Convert '1.82.8' to (1, 82, 8) for simple numeric comparison."""
+    try:
+        return tuple(int(x) for x in v.split(".")[:3])
+    except ValueError:
+        return (0,)
+
+BLOCKED_VERSIONS: dict[str, tuple[Callable[[str], bool], str]] = {
+    "litellm": (
+        lambda v: _parse_ver(v) < (1, 83, 0),
+        "Supply chain attack in litellm < 1.83.0 (compromised release: 1.82.8, 2026-03-24)",
+    ),
 }
 
 
 def check_blocked_packages() -> list[str]:
     """Detect known-compromised or dangerous packages."""
     issues = []
+
+    # Blanket name blocks (any version)
     for pkg in BLOCKED_PACKAGES:
         try:
             version = importlib.metadata.version(pkg)
@@ -50,6 +74,18 @@ def check_blocked_packages() -> list[str]:
             )
         except importlib.metadata.PackageNotFoundError:
             pass  # Good — not installed
+
+    # Version-range blocks (only specific version ranges are dangerous)
+    for pkg, (predicate, reason) in BLOCKED_VERSIONS.items():
+        try:
+            version = importlib.metadata.version(pkg)
+            if predicate(version):
+                issues.append(
+                    f"BLOCKED PACKAGE INSTALLED: {pkg}=={version} — {reason}"
+                )
+        except importlib.metadata.PackageNotFoundError:
+            pass  # Good — not installed
+
     return issues
 
 
