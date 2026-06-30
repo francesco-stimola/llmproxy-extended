@@ -9,7 +9,7 @@ plugins:
   - name: "PII Neural Masker"
     hook: "pre_flight"
     priority: 20
-    enabled: true
+    enabled: false
     fail_policy: "closed"
     version: "1.0.0"
     entrypoint: "default.pii_masker:mask"
@@ -145,6 +145,59 @@ plugins:
         default: 0.8
         min: 0.5
         max: 0.99
+
+  # ── llmproxy-extended: ONNX PII Masker + Headroom Compressor ──
+
+  - name: "ONNX PII Masker"
+    hook: "pre_flight"
+    priority: 19
+    enabled: true
+    fail_policy: "open"
+    type: "python"
+    entrypoint: "installed.onnx_pii_masker:OnnxPiiMasker"
+    version: "1.0.0"
+    author: "llmproxy-extended"
+    description: "PII masking via OpenAI Privacy Filter NER (ONNX). Replaces Presidio. 8 categories: PRIVATE_PERSON, PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_ADDRESS, PRIVATE_URL, PRIVATE_DATE, ACCOUNT_NUMBER, SECRET."
+    timeout_ms: 2000
+    config:
+      model_id: "openai/privacy-filter"
+      variant: "int8"
+      backend: "auto"
+    ui_schema:
+      - key: "variant"
+        type: "select"
+        label: "Model Variant"
+        description: "ONNX quantization variant. int8 recommended (1.6 GB, ~99% accuracy, DML-safe)."
+        default: "int8"
+        options: ["int8", "fp16", "fp32", "q4", "q4f16"]
+      - key: "backend"
+        type: "select"
+        label: "Inference Backend"
+        description: "auto = DirectML if available (int8 only), otherwise CPU."
+        default: "auto"
+        options: ["auto", "cpu", "directml"]
+
+  - name: "Headroom Compressor"
+    hook: "pre_flight"
+    priority: 25
+    enabled: false
+    fail_policy: "open"
+    type: "python"
+    entrypoint: "installed.headroom_compressor:HeadroomCompressor"
+    version: "1.0.0"
+    author: "llmproxy-extended"
+    description: "Context compression via Headroom (60-95% token reduction). Runs after ONNX PII masking. Requires: pip install headroom[ml]"
+    timeout_ms: 10000
+    config:
+      min_tokens_to_compress: 200
+    ui_schema:
+      - key: "min_tokens_to_compress"
+        type: "number"
+        label: "Min Words to Compress"
+        description: "Skip compression for messages shorter than this word count."
+        default: 200
+        min: 50
+        max: 2000
 
   # ── Optional Marketplace Plugins (disabled by default — opt-in) ──
 

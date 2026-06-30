@@ -36,7 +36,7 @@ The scope includes the 5-Ring Security Pipeline, the ASGI Middleware (Rate Limit
 * **Vector 2: Secret Leakage:** The proxy logs upstream API keys or leaks them in 500 stack traces.
 * **Mitigation:**
   - Strict filtering of `Authorization` headers from all logs.
-  - L4 PII Scanner (Presidio) sanitizes outgoing prompts and incoming responses.
+  - L4 PII Scanner (ONNX Privacy Filter NER) sanitizes outgoing prompts and incoming responses via vault-based tokenization.
   - FastAPI exception handlers trap 500 errors to prevent stack trace leakage.
 
 ## 5. Denial of Service (DoS)

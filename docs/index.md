@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Security Pipeline
-    details: 10-layer defense with ASGI firewall, injection scoring, PII masking (Presidio NLP + regex), and multi-turn trajectory detection.
+    details: 10-layer defense with ASGI firewall, injection scoring, PII masking (ONNX Privacy Filter NER + regex), and multi-turn trajectory detection.
   - title: Ring Plugin Engine
     details: 5-ring pipeline (Ingress, Pre-Flight, Routing, Post-Flight, Background) with 18 marketplace plugins and WASM sandbox support.
   - title: 15 Providers
@@ -26,7 +26,7 @@ features:
   - title: SOC Dashboard
     details: Real-time Security Operations Center with threat monitoring, guard controls, plugin management, spend analytics, and live terminal logs.
   - title: PII Detection
-    details: Dual-mode PII masking with Presidio NLP engine (18 entity types) and regex fallback. Vault-based tokenization with reversible demasking.
+    details: ONNX-based PII masking with OpenAI Privacy Filter NER (8 focused categories, fine-tuned transformer) and regex safety net. Vault-based tokenization with reversible demasking.
   - title: Smart Routing
     details: EMA-weighted latency routing, cross-provider fallback chains, model aliases, budget-aware downgrading, and A/B model experimentation.
 ---

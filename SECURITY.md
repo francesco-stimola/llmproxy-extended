@@ -51,7 +51,7 @@ LLMProxy implements defense-in-depth with 6 layers:
 
 - Semantic injection detection uses lexical similarity (not full NLU)
 - ASGI firewall is pattern-based; novel encoding schemes may bypass detection
-- PII masking relies on regex + Presidio NLP; domain-specific PII may require custom patterns
+- PII masking relies on ONNX NER (OpenAI Privacy Filter) + regex safety net; domain-specific PII may require custom patterns or a fine-tuned model
 - Plugin AST scanning is not a security sandbox; use WASM runtime for untrusted plugins
 
 ## Supported Versions

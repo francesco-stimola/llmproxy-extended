@@ -107,3 +107,7 @@ docs/CYBERAPI_INTEGRATION.md
 docs/ECOSYSTEM_MAP.md
 docs/INTEGRATION_ARCHITECTURE.md
 .venv
+
+# ONNX model files — large binaries, always use HuggingFace hub
+*.onnx
+*.onnx_data
