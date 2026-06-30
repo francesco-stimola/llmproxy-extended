@@ -17,9 +17,6 @@ placeholder (reverse_index). Across requests the vault handles re-mapping.
 Requirements: onnxruntime>=1.18.0  transformers>=4.40.0  huggingface-hub>=0.20.0
 Model must be pre-downloaded locally: huggingface-cli download openai/privacy-filter
 """
-from __future__ import annotations
-
-import os
 from typing import Any
 
 from core.plugin_sdk import BasePlugin, PluginHook, PluginResponse
@@ -202,7 +199,7 @@ class OnnxPiiMasker(BasePlugin):
         model_id: str = self.config.get("model_id", MODEL_ID)
         variant: str = self.config.get("variant", "int8")
         backend_pref: str = self.config.get("backend", "auto")
-        force_cpu: bool = os.environ.get("PRIVACY_TOOL_FORCE_CPU") == "1"
+        force_cpu: bool = bool(self.config.get("force_cpu", False))
 
         if variant not in VARIANTS:
             self.logger.warning(f"Unknown variant '{variant}', falling back to int8")

@@ -115,7 +115,7 @@ plugins:
     version: "1.0.0"
     author: "llmproxy"
     description: "Pre-flight budget enforcement with cost estimation"
-    timeout_ms: 5
+    timeout_ms: 100
     config:
       session_budget_usd: 5.0
       team_budget_usd: 100.0
@@ -163,6 +163,7 @@ plugins:
       model_id: "openai/privacy-filter"
       variant: "int8"
       backend: "auto"
+      force_cpu: false
     ui_schema:
       - key: "variant"
         type: "select"

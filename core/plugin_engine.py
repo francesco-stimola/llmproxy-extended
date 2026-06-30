@@ -127,6 +127,12 @@ ALLOWED_MODULES = {
     "time",
     "core",  # core.plugin_sdk, core.plugin_engine (for PluginContext import)
     "fastapi",
+    # llmproxy-extended: ONNX PII masker + Headroom compressor
+    "onnxruntime",
+    "numpy",
+    "transformers",
+    "huggingface_hub",
+    "headroom",
 }
 
 
