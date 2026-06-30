@@ -105,18 +105,55 @@ Switch variant at any time in `plugins/manifest.yaml` under the ONNX PII Masker 
 
 ### 3. Configure your LLM provider
 
-Edit `.env` (copy from `.env.example`):
+#### Personal / single-user mode (recommended for local use)
+
+The proxy runs on your machine and you are the only user. The ingress auth plugin is
+**disabled by default** in `plugins/manifest.yaml`, so your real upstream API key
+flows through the proxy transparently — no extra proxy token to manage.
+
+Just tell the proxy where your provider lives. For cloud providers the key is already
+in your shell session; for local models declare the URL:
 
 ```bash
-LLM_PROXY_API_KEYS=sk-proxy-mykey
-ANTHROPIC_API_KEY=sk-ant-...
-```
+# .env — cloud provider (key comes from your existing shell environment)
+# Nothing extra needed: ANTHROPIC_API_KEY is already set in your Claude Code session.
 
-Or declare endpoints inline in `.env` for local models:
-
-```bash
+# .env — local model (Ollama, LM Studio, vLLM …)
 LLM_PROXY_ENDPOINT_OLLAMA_URL=http://localhost:11434/v1
 LLM_PROXY_ENDPOINT_OLLAMA_MODELS=llama3.2,qwen2.5-coder
+```
+
+Point Claude Code at the proxy — that is the only change needed:
+
+```bash
+# Shell or Claude Code environment
+ANTHROPIC_BASE_URL=http://localhost:8090/v1
+# ANTHROPIC_API_KEY stays unchanged — the proxy passes it through to Anthropic.
+```
+
+#### Team / multi-user mode
+
+Multiple users or services share the same proxy instance. The upstream key lives only
+on the proxy; clients authenticate with short-lived proxy tokens.
+
+Enable ingress auth in `plugins/manifest.yaml`:
+```yaml
+- name: "Ingress Auth & Zero-Trust"
+  enabled: true          # re-enable for team use
+```
+
+Then configure `.env`:
+```bash
+# .env
+LLM_PROXY_API_KEYS=sk-proxy-alice,sk-proxy-bob   # one token per client
+ANTHROPIC_API_KEY=sk-ant-...                       # real key, only here
+```
+
+Clients use a proxy token, not the real key:
+```bash
+# Claude Code (each user)
+ANTHROPIC_BASE_URL=http://localhost:8090/v1
+ANTHROPIC_API_KEY=sk-proxy-alice    # proxy token, not the real Anthropic key
 ```
 
 ### 4. Start the proxy
@@ -128,30 +165,23 @@ python main.py
 The proxy starts on `http://localhost:8090`. Point your client here:
 
 ```python
-# Anthropic SDK
+# Personal mode — Anthropic SDK (real key passed through)
 from anthropic import Anthropic
 
 client = Anthropic(
-    api_key="sk-proxy-mykey",
     base_url="http://localhost:8090/v1",
+    # api_key not set here — comes from ANTHROPIC_API_KEY env var as usual
 )
 ```
 
 ```python
-# OpenAI SDK (works with any provider configured in config.yaml)
+# Team mode — OpenAI SDK (proxy token used instead of real key)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-proxy-mykey",
+    api_key="sk-proxy-alice",
     base_url="http://localhost:8090/v1",
 )
-```
-
-For Claude Code specifically, set in your shell or `.env`:
-
-```bash
-ANTHROPIC_BASE_URL=http://localhost:8090/v1
-ANTHROPIC_API_KEY=sk-proxy-mykey
 ```
 
 ---

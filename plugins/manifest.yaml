@@ -2,7 +2,13 @@ plugins:
   - name: "Ingress Auth & Zero-Trust"
     hook: "ingress"
     priority: 10
-    enabled: true
+    # Personal / single-user mode: disabled so the real upstream API key
+    # (e.g. ANTHROPIC_API_KEY held by Claude Code) flows through the proxy
+    # transparently without needing a separate proxy token.
+    # Multi-user / team mode: set enabled: true and configure
+    # LLM_PROXY_API_KEYS=<token1,token2,...> — clients use those tokens while
+    # the proxy holds the upstream key in its own environment.
+    enabled: false
     version: "1.0.0"
     entrypoint: "default.ingress_auth:verify"
 
