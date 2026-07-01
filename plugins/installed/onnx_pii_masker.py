@@ -42,19 +42,23 @@ DML_SAFE_VARIANTS: frozenset[str] = frozenset({"int8"})
 # Trigger-word regex for person names that NER misses in informal Italian/English
 # phrasing (e.g. "Ciao sono peppino cavallo" where int8 tokenizes "peppino" as
 # low-confidence subword fragments). Matches FirstName Surname after an introductory
-# phrase; negative lookahead prevents greedy over-capture into following words.
+# phrase.
+# Negative lookahead blocks greedy over-capture into multi-char words (e.g. "Mario
+# Rossi ingegnere") but allows single-char conjunctions (e.g. "Pinco Pallino e ...").
 _REGEX_PERSON_TRIGGERS = re.compile(
     r"""
     (?:
-        \b(?:sono|mi\s+chiamo|chiamami|nome\s+[eè]|mi\s+presento(?:\s+come)?|
-            presentarmi\s+come|parlando\s+con|parla\s+con|
-            I\s+am|my\s+name\s+is|I'm|call\s+me)
+        \b(?:sono|mi\s+chiamo|chiamami|si\s+chiama|nome\s+[eè]|
+            mi\s+presento(?:\s+come)?|presentarmi\s+come|
+            parlando\s+con|parla\s+con|
+            I\s+am|my\s+name\s+is|I'm|call\s+me|
+            her\s+name\s+is|his\s+name\s+is|their\s+name\s+is)
         \s+
     )
     ([A-Za-zÀ-ÿ][a-zà-ÿ]{1,20}
     \s+
     [A-Za-zÀ-ÿ][a-zà-ÿ]{1,20})
-    (?!\s+[a-zà-ÿ])
+    (?!\s+[a-zà-ÿ]{2,})
     """,
     re.VERBOSE | re.IGNORECASE,
 )
@@ -244,7 +248,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.4"
+    version = "1.2.5"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
