@@ -185,7 +185,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.0"
+    version = "1.2.1"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -200,8 +200,19 @@ class OnnxPiiMasker(BasePlugin):
         super().__init__(config)
         self._classifier: _OnnxClassifier | None = None
         self._backend: str = "not-loaded"
+        # debug_input_only: mask input normally but skip vault population so
+        # the de-masker has nothing to restore — the response comes back with
+        # raw placeholders ([PRIVATE_PERSON_1] etc.) instead of original values.
+        # Useful for verifying what the provider actually received and returned.
+        self._debug_input_only: bool = bool(config.get("debug_input_only", False)) if config else False
 
     async def on_load(self) -> None:
+        if self._debug_input_only:
+            self.logger.warning(
+                "ONNX PII Masker: DEBUG MODE ACTIVE (debug_input_only=true) — "
+                "input is masked but responses are NOT de-masked. "
+                "Placeholders will appear in LLM output. DO NOT use in production."
+            )
         try:
             self._classifier, self._backend = self._build_classifier()
             self.logger.info(f"ONNX PII masker ready — backend={self._backend}")
@@ -280,6 +291,9 @@ class OnnxPiiMasker(BasePlugin):
             return PluginResponse.passthrough()
 
         vault = rotator.security.pii_vault
+        # In debug mode we use a throwaway dict instead of the real vault so
+        # the de-masker finds no entries and leaves placeholders in the response.
+        active_vault = {} if self._debug_input_only else vault
         reverse_index: dict = {}  # (group, value_lower) → placeholder
         counters: dict = {}       # group → current max N
 
@@ -295,7 +309,7 @@ class OnnxPiiMasker(BasePlugin):
                 continue
             if not raw_entities:
                 continue
-            masked = _mask_text(content, raw_entities, vault, reverse_index, counters)
+            masked = _mask_text(content, raw_entities, active_vault, reverse_index, counters)
             if masked != content:
                 msg["content"] = masked
                 any_masked = True
@@ -303,9 +317,10 @@ class OnnxPiiMasker(BasePlugin):
         if any_masked:
             ctx.metadata["pii_masked"] = True
             categories = ", ".join(sorted(counters.keys()))
-            self.logger.info(f"PII masked: [{categories}] — {len(counters)} category(ies)")
+            debug_suffix = " [DEBUG: output NOT de-masked]" if self._debug_input_only else ""
+            self.logger.info(f"PII masked: [{categories}] — {len(counters)} category(ies){debug_suffix}")
             await rotator._add_log(
-                f"ONNX PII Masker: masked [{categories}]", level="SYSTEM"
+                f"ONNX PII Masker: masked [{categories}]{debug_suffix}", level="SYSTEM"
             )
             return PluginResponse.modify(body=body)
 
