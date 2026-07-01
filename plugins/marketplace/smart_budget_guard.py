@@ -38,7 +38,7 @@ class SmartBudgetGuard(BasePlugin):
     description = (
         "Pre-flight budget enforcement with cost estimation and SQLite persistence"
     )
-    timeout_ms = 500  # Allow time for first-execute SQLite hydration
+    timeout_ms = 2000  # Allow time for first-execute SQLite hydration + daily reset
 
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__(config)

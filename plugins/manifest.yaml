@@ -26,7 +26,7 @@ plugins:
     enabled: false
     version: "1.0.0"
     entrypoint: "default.cache_check:lookup"
-    timeout_ms: 500
+    timeout_ms: 2000
 
   - name: "Smart Router"
     hook: "routing"

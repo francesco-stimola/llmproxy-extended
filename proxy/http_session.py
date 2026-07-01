@@ -25,7 +25,10 @@ def build_http_session(config: Dict[str, Any]) -> aiohttp.ClientSession:
     Caller is responsible for caching/closing the returned session.
     """
     http_cfg = config.get("server", {})
-    timeout_s = int(str(http_cfg.get("timeout", "30s")).rstrip("s"))
+    # Default 600s: must cover pre-flight compression (up to ~30s) + Anthropic
+    # response time (up to ~300s for long generations), matching the Claude Code
+    # client timeout sent in x-stainless-timeout.
+    timeout_s = int(str(http_cfg.get("timeout", "600s")).rstrip("s"))
     pool_cfg = config.get("connection_pool", {})
     connector = aiohttp.TCPConnector(
         limit=pool_cfg.get("max_connections", 100),

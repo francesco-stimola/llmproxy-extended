@@ -21,6 +21,7 @@ Key design decisions:
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -177,20 +178,35 @@ def create_router(agent) -> APIRouter:
         # --- Streaming passthrough ---
         if is_streaming:
             async def _stream():
-                async with session.post(
-                    upstream_url, json=processed_body, headers=forward_headers
-                ) as resp:
-                    if resp.status >= 400:
-                        err = await resp.text()
-                        logger.warning(
-                            "Anthropic upstream error %s: %s", resp.status, err[:200]
-                        )
+                import aiohttp as _aiohttp  # noqa: PLC0415 — local to avoid circular at module level
+                try:
+                    async with session.post(
+                        upstream_url, json=processed_body, headers=forward_headers
+                    ) as resp:
+                        if resp.status >= 400:
+                            err = await resp.text()
+                            logger.warning(
+                                "Anthropic upstream error %s: %s", resp.status, err[:200]
+                            )
+                            yield (
+                                f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'api_error', 'message': err}})}\n\n"
+                            ).encode()
+                            return
+                        async for chunk in resp.content:
+                            yield chunk
+                except asyncio.CancelledError:
+                    # Client disconnected — abort silently
+                    return
+                except (TimeoutError, _aiohttp.ClientError) as exc:
+                    # aiohttp wraps CancelledError → TimeoutError when its timer is
+                    # active; catch both that and aiohttp-level errors gracefully.
+                    logger.warning("Upstream connection error (stream): %s", exc)
+                    try:
                         yield (
-                            f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'api_error', 'message': err}})}\n\n"
+                            f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'connection_error', 'message': str(exc)}})}\n\n"
                         ).encode()
-                        return
-                    async for chunk in resp.content:
-                        yield chunk
+                    except Exception:
+                        pass
 
             MetricsTracker.track_request(
                 "POST", "/v1/messages", 200, time.time() - start_time

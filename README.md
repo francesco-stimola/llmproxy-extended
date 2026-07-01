@@ -370,6 +370,14 @@ Place the file in `plugins/installed/` and register it in `plugins/manifest.yaml
 
 ---
 
+## Claude Code Integration
+
+Route Claude Code (VS Code extension or CLI) transparently through the proxy with zero key configuration — the OAuth token flows through automatically.
+
+See **[docs/claude-code-integration.md](docs/claude-code-integration.md)** for setup, verified test results, and known behaviors.
+
+---
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
