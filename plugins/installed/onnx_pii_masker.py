@@ -193,7 +193,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.2"
+    version = "1.2.3"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -285,6 +285,49 @@ class OnnxPiiMasker(BasePlugin):
         sess = ort.InferenceSession(local_path, providers=providers)
         return _OnnxClassifier(sess, tok, id2label), backend
 
+    def _mask_str_field(
+        self,
+        target: dict,
+        field: str,
+        text: str,
+        vault: Any,
+        reverse_index: dict,
+        counters: dict,
+        role: str,
+    ) -> bool:
+        """Run NER on `text`, write masked result back to target[field].
+        Returns True if any entity was masked."""
+        try:
+            raw_entities = self._classifier(text)
+        except Exception as exc:
+            self.logger.warning(f"Inference failed on {role}/{field}: {exc}")
+            return False
+        if not raw_entities:
+            return False
+
+        if self._debug_input_only:
+            entities_summary = ", ".join(
+                f"{e['entity_group']}={repr(e['word'])}@{e['start']}-{e['end']} ({e['score']:.2f})"
+                for e in sorted(raw_entities, key=lambda x: x["start"])
+            )
+            self.logger.info(
+                "[DEBUG] msg[%s].%s detected: %s | text: %s…",
+                role, field, entities_summary, text[:120].replace("\n", " "),
+            )
+
+        masked = _mask_text(text, raw_entities, vault, reverse_index, counters,
+                            debug=self._debug_input_only)
+        if masked == text:
+            return False
+
+        target[field] = masked
+        if self._debug_input_only:
+            self.logger.info(
+                "[DEBUG] msg[%s].%s after masking: %s…",
+                role, field, masked[:120].replace("\n", " "),
+            )
+        return True
+
     async def execute(self, ctx: PluginContext) -> PluginResponse:
         if self._classifier is None:
             return PluginResponse.passthrough()
@@ -304,42 +347,27 @@ class OnnxPiiMasker(BasePlugin):
 
         any_masked = False
         for msg in messages:
-            content = msg.get("content", "")
-            if not content or not isinstance(content, str):
-                continue
-            try:
-                raw_entities = self._classifier(content)
-            except Exception as exc:
-                self.logger.warning(f"Inference failed on message: {exc}")
+            role = msg.get("role", "?")
+            content = msg.get("content")
+            if not content:
                 continue
 
-            if self._debug_input_only and raw_entities:
-                role = msg.get("role", "?")
-                preview = content[:120].replace("\n", " ")
-                entities_summary = ", ".join(
-                    f"{e['entity_group']}={repr(e['word'])}@{e['start']}-{e['end']} "
-                    f"({e['score']:.2f})"
-                    for e in sorted(raw_entities, key=lambda x: x["start"])
+            if isinstance(content, str):
+                # Plain string content (system prompt, simple user/assistant messages)
+                any_masked |= self._mask_str_field(
+                    msg, "content", content, vault, reverse_index, counters, role
                 )
-                self.logger.info(
-                    "[DEBUG] msg[%s] detected: %s | text: %s…",
-                    role, entities_summary, preview,
-                )
-
-            if not raw_entities:
-                continue
-            masked = _mask_text(
-                content, raw_entities, vault, reverse_index, counters,
-                debug=self._debug_input_only,
-            )
-            if masked != content:
-                msg["content"] = masked
-                any_masked = True
-                if self._debug_input_only:
-                    role = msg.get("role", "?")
-                    self.logger.info(
-                        "[DEBUG] msg[%s] after masking: %s…",
-                        role, masked[:120].replace("\n", " "),
+            elif isinstance(content, list):
+                # Content block list: [{"type": "text", "text": "..."}, ...]
+                # Used by Claude Code for user turns and tool results.
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "text":
+                        continue
+                    text = block.get("text", "")
+                    if not text:
+                        continue
+                    any_masked |= self._mask_str_field(
+                        block, "text", text, vault, reverse_index, counters, role
                     )
 
         if any_masked:
