@@ -235,9 +235,13 @@ def estimate_cost_pre_flight(
 
 
 def set_model_pricing(pricing: dict):
-    """Dynamically overwrite MODEL_PRICING and re-sort _SORTED_PREFIXES."""
+    """Merge external pricing into MODEL_PRICING and re-sort _SORTED_PREFIXES.
+
+    Entries in `pricing` override the static table; models absent from `pricing`
+    keep their static defaults. This means data/pricing.yaml is additive — a
+    missing entry there no longer silently drops a model from the table.
+    """
     global MODEL_PRICING, _SORTED_PREFIXES
-    MODEL_PRICING.clear()
     MODEL_PRICING.update(pricing)
     # Convert all keys and values to proper formats
     for k, v in list(MODEL_PRICING.items()):
