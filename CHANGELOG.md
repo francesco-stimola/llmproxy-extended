@@ -2,6 +2,40 @@
 
 All notable changes to LLMProxy are documented here.
 
+## [1.21.74] — 2026-07-01
+
+### ONNX PII Masker — Chunked Inference & torch Removal
+
+**Root cause investigated and fixed:** ONNX Runtime's self-attention is O(n²) in memory.
+On a typical Claude Code context (10 720 tokens, 12 heads, fp32 attention): 12 × 10720² × 4 B
+≈ 5.5 GB attention matrices + 1.6 GB model weights = **7.3 GB peak RSS**. The fix processes
+the token stream in 512-token windows, capping each call at ~12 MB of attention memory.
+
+- **`onnx_pii_masker.py` v1.2.0** — added `_CHUNK_SIZE = 512`; rewrote `_OnnxClassifier.__call__`
+  to loop over 512-token chunks. Removed `tok.enable_truncation()` (chunking handles
+  arbitrary-length inputs; truncation would silently drop tokens beyond the limit).
+  Observed peak RSS: **~1.77 GB** (vs 7.3 GB before).
+
+- **`requirements.txt`** — removed `transformers>=4.40.0`. The plugin uses the Rust `tokenizers`
+  library directly, avoiding the `transformers.__init__` side-effect that triggers `import torch`
+  and loads 2–3 GB of PyTorch runtime. `torch` is now never imported by the proxy.
+
+- **`docs/security/pii-detection.md`** — added "Memory Profile & Chunked Inference" section
+  documenting the O(n²) root cause, the per-chunk RAM table, and the tokenizers-vs-transformers
+  design decision.
+
+### Headroom Compressor — Eager Loading & Kompress Enabled
+
+- **`headroom_compressor.py` v1.3.0** — switched from lazy (first-request) to eager startup
+  import. When `use_kompress: true`, a warmup `compress()` call is issued in a thread executor
+  at `on_load()` so headroom's background model-load thread starts immediately — first real
+  requests find Kompress already warm.
+
+- **`manifest.yaml`** — enabled `use_kompress: true` in Headroom Compressor config.
+  Added updated comment explaining the RAM cost (~600 MB Kompress on top of 1.77 GB PII model).
+
+---
+
 ## [1.21.73] — 2026-06-02
 
 ### Phase 4 Quality Assurance & Distributed Architecture

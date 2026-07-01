@@ -108,6 +108,25 @@ Ring 4 POST_FLIGHT
 
 The plugin processes **all messages** in the request body — user prompts, system messages, tool results, file contents, MCP outputs — anything in the `messages` array.
 
+## Memory Profile & Chunked Inference
+
+ONNX Runtime's self-attention is **O(n²)** in memory: the attention matrix for a sequence of length *n* across *h* heads requires `h × n² × 4 bytes`. For the `openai/privacy-filter` model (12 heads), processing a full Claude Code context (~10 000–15 000 tokens) without chunking would allocate:
+
+| Sequence length | Attention memory | + Model weights | Peak RSS |
+|---|---|---|---|
+| 512 tokens | ~12 MB | +1.6 GB | ~1.6 GB |
+| 4 096 tokens | ~768 MB | +1.6 GB | ~2.4 GB |
+| 10 720 tokens | ~5.5 GB | +1.6 GB | **~7.3 GB** |
+
+To keep RAM flat, `OnnxPiiMasker` processes the token stream in **512-token windows** (constant `_CHUNK_SIZE = 512`). Each ONNX call sees at most 512 tokens → ~12 MB attention memory regardless of total context size. PII spans are at most a few words, so no entity ever straddles a chunk boundary.
+
+The tokenizer (`tokenizers` Rust library) encodes the full text once and returns per-token character offsets relative to the original string, so entity positions are always correct without any offset re-mapping per chunk.
+
+**Observed RAM (int8 variant, CPU):** ~1.77 GB total process RSS (model memory-mapped, not counted in Task Manager's "private working set" column).
+
+> **Why `tokenizers` instead of `transformers`?**  
+> `transformers.__init__` runs backend detection that triggers `import torch` as a side-effect, adding 2–3 GB of RAM just for the library. Using `tokenizers` (the Rust BPE library) directly avoids the entire `torch` import path. The ONNX session handles inference; `tokenizers` handles tokenization. `torch` is never loaded.
+
 ## Configuration
 
 ```yaml

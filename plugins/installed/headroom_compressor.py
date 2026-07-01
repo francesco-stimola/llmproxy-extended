@@ -56,15 +56,25 @@ class HeadroomCompressor(BasePlugin):
         self._import_attempted = False
 
     async def on_load(self) -> None:
-        # Intentionally skip eager import of headroom — the Kompress ML model
-        # (torch + ModernBERT ONNX, ~2 GB RAM) loads when the library is first
-        # imported and used. Deferring to execute() means the model only loads
-        # on the first request that actually meets the compression threshold.
+        import asyncio
+
         use_kompress = bool(self.config.get("use_kompress", True))
-        self.logger.info(
-            "Headroom compressor registered — mode: %s (model loads on first qualifying request)",
-            "Kompress ML" if use_kompress else "structural only (no torch/ML — kompress_model=disabled)",
-        )
+        self._try_import()  # eager import at startup — no per-request latency spike
+        if self._compress is None:
+            return
+
+        if use_kompress:
+            # Trigger Kompress background model load now so the first real request
+            # finds the ModernBERT ONNX model already warm. headroom starts its own
+            # background thread internally; the executor call here just delivers the
+            # trigger without blocking the event loop.
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._compress([{"role": "user", "content": "warmup"}], model="gpt-4o"),
+            )
+            self.logger.info("Headroom: Kompress model loading in background (warmup triggered)")
+        else:
+            self.logger.info("Headroom: structural compressor ready — Kompress disabled")
 
     def _try_import(self) -> None:
         """Import headroom on the first execute() call that actually needs compression."""

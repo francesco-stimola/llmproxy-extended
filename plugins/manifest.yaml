@@ -144,13 +144,13 @@ plugins:
   - name: "Headroom Compressor"
     hook: "pre_flight"
     priority: 25
-    # use_kompress: false — structural compression only (SmartCrusher for JSON/tool
-    # outputs, LogCompressor, SearchCompressor). Kompress ML model (ModernBERT ONNX,
-    # torch ~2 GB RAM) is NOT loaded. Fast, deterministic, no model download needed.
+    # use_kompress: true — full ML pipeline (Kompress ModernBERT ONNX + structural
+    # compressors). Model loads eagerly at startup in a background thread so the
+    # first real request finds it warm (no 15-17s cold-start latency on first call).
+    # RAM cost: ~600 MB (Kompress ModernBERT) on top of the 1.77 GB ONNX PII model.
     #
-    # Set use_kompress: true to enable ML compression (~12% additional reduction on
-    # prose/general text). Requires: pip install "headroom-ai[ml,code]" and accepts
-    # 15-17 s on the first compression pass.
+    # Set use_kompress: false for structural-only (SmartCrusher, LogCompressor,
+    # SearchCompressor) — no Kompress model, instant, zero-ML, ~0 extra RAM.
     enabled: true
     fail_policy: "open"
     type: "python"
@@ -161,7 +161,7 @@ plugins:
     timeout_ms: 30000
     config:
       min_tokens_to_compress: 200
-      use_kompress: false
+      use_kompress: true
     ui_schema:
       - key: "min_tokens_to_compress"
         type: "number"
