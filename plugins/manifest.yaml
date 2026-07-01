@@ -118,7 +118,7 @@ plugins:
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.onnx_pii_masker:OnnxPiiMasker"
-    version: "1.0.0"
+    version: "1.2.0"
     author: "llmproxy-extended"
     description: "PII masking via OpenAI Privacy Filter NER (ONNX). 8 categories: PRIVATE_PERSON, PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_ADDRESS, PRIVATE_URL, PRIVATE_DATE, ACCOUNT_NUMBER, SECRET."
     timeout_ms: 2000

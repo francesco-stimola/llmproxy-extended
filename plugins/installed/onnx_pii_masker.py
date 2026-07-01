@@ -47,13 +47,23 @@ def _strippable(ch: str) -> bool:
     return ch.isspace() or ch in _STRIP_PUNCT
 
 
+# Max tokens per ONNX inference call. ONNX Runtime computes full self-attention
+# which is O(n²) in memory: at n=10720 → ~5.5 GB for the attention matrix alone.
+# Chunking to 512 tokens per call keeps each call under ~12 MB of attention memory.
+# PII spans are at most a few words, never spanning a 512-token chunk boundary.
+_CHUNK_SIZE = 512
+
+
 class _OnnxClassifier:
     """Minimal token-classification runner over a raw ONNX Runtime session.
 
     Uses the `tokenizers` (Rust) library directly instead of `transformers`
     to avoid importing torch as a side-effect of transformers.__init__.
-    The fast tokenizer loaded from tokenizer.json behaves identically to
-    AutoTokenizer: same vocab, same CLS/SEP post-processor, same offsets.
+
+    Long texts are processed in _CHUNK_SIZE-token chunks to avoid O(n²) attention
+    memory blowup. Character offsets from the tokenizer map directly back to the
+    original text regardless of which chunk a token falls in, so entity positions
+    are always correct without any offset re-mapping.
 
     Token-level entities are stitched into spans by _merge_consecutive,
     mirroring transformers' aggregation_strategy="simple" behaviour.
@@ -69,38 +79,45 @@ class _OnnxClassifier:
 
         # tokenizers Rust library: encode() returns an Encoding with
         # .ids, .attention_mask, .offsets (list of (start, end) char tuples).
-        # add_special_tokens=True prepends CLS and appends SEP by default.
+        # Truncation is disabled here — chunking handles length limits below.
         enc = self.tok.encode(text)
-        ids_arr = np.array([enc.ids], dtype="int64")
-        attn_arr = np.array([enc.attention_mask], dtype="int64")
-        offsets = enc.offsets  # List[Tuple[int, int]]
-
-        feeds = {
-            "input_ids": ids_arr,
-            "attention_mask": attn_arr,
-        }
-        logits = self.session.run(["logits"], feeds)[0][0]  # (seq_len, num_labels)
-        label_ids = logits.argmax(-1)
-        m = logits.max(-1, keepdims=True)
-        ex = np.exp(logits - m)
-        probs = ex / ex.sum(-1, keepdims=True)
+        all_ids = enc.ids
+        all_offsets = enc.offsets  # char offsets relative to original text
 
         ents = []
-        for i, lab_id in enumerate(label_ids):
-            label = self.id2label[int(lab_id)]
-            if label == "O":
-                continue
-            start, end = int(offsets[i][0]), int(offsets[i][1])
-            if start == end:  # special token (CLS / SEP / pad) — offset is (0,0)
-                continue
-            group = label.split("-", 1)[-1]  # strip B-/I-/E-/S- prefix
-            ents.append({
-                "entity_group": group,
-                "start": start,
-                "end": end,
-                "score": float(probs[i, int(lab_id)]),
-                "word": text[start:end],
-            })
+        # Process in fixed-size chunks. Each chunk is an independent ONNX call,
+        # capping peak attention memory at O(_CHUNK_SIZE²) ≈ 12 MB per call.
+        for chunk_start in range(0, len(all_ids), _CHUNK_SIZE):
+            chunk_ids = all_ids[chunk_start: chunk_start + _CHUNK_SIZE]
+            chunk_offsets = all_offsets[chunk_start: chunk_start + _CHUNK_SIZE]
+
+            ids_arr = np.array([chunk_ids], dtype="int64")
+            # All tokens in the chunk are real (no padding), so attention mask = 1.
+            attn_arr = np.ones((1, len(chunk_ids)), dtype="int64")
+
+            feeds = {"input_ids": ids_arr, "attention_mask": attn_arr}
+            logits = self.session.run(["logits"], feeds)[0][0]  # (chunk_len, num_labels)
+            label_ids = logits.argmax(-1)
+            m = logits.max(-1, keepdims=True)
+            ex = np.exp(logits - m)
+            probs = ex / ex.sum(-1, keepdims=True)
+
+            for i, lab_id in enumerate(label_ids):
+                label = self.id2label[int(lab_id)]
+                if label == "O":
+                    continue
+                start, end = int(chunk_offsets[i][0]), int(chunk_offsets[i][1])
+                if start == end:  # special token (BOS/EOS/pad) — offset is (0,0)
+                    continue
+                group = label.split("-", 1)[-1]  # strip B-/I-/E-/S- prefix
+                ents.append({
+                    "entity_group": group,
+                    "start": start,
+                    "end": end,
+                    "score": float(probs[i, int(lab_id)]),
+                    "word": text[start:end],
+                })
+
         return ents
 
 
@@ -168,7 +185,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.1.0"
+    version = "1.2.0"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -240,13 +257,11 @@ class OnnxPiiMasker(BasePlugin):
         }
 
         # Load tokenizer from tokenizer.json using the Rust tokenizers library.
-        # This is identical in output to AutoTokenizer.from_pretrained() for fast
-        # tokenizers — same vocab, same CLS/SEP post-processor, same char offsets.
-        # max_length from model config; default 512 for BERT-family models.
-        max_len: int = int(config_data.get("max_position_embeddings", 512))
+        # Truncation is NOT enabled here — _OnnxClassifier processes the text
+        # in _CHUNK_SIZE-token chunks, so no pre-truncation is needed and all
+        # PII across arbitrarily long texts is found.
         tok_path = hf_hub_download(model_id, "tokenizer.json", local_files_only=True)
         tok = _HFTokenizer.from_file(tok_path)
-        tok.enable_truncation(max_length=max_len)
 
         sess = ort.InferenceSession(local_path, providers=providers)
         return _OnnxClassifier(sess, tok, id2label), backend
