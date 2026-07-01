@@ -16,71 +16,10 @@ logger = logging.getLogger("llmproxy.pricing")
 # request that names it. Reset on process restart.
 _DEFAULT_PRICING_WARNED: Set[str] = set()
 
-# ── Static pricing table ($/MTok) ──
-# Sources: official provider pricing pages as of March 2026
-
-MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    # OpenAI
-    "gpt-4o": {"input": 2.50, "output": 10.00},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4.1": {"input": 2.00, "output": 8.00},
-    "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
-    "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
-    "o3-mini": {"input": 1.10, "output": 4.40},
-    "o3": {"input": 10.00, "output": 40.00},
-    "o4-mini": {"input": 1.10, "output": 4.40},
-    # Anthropic (platform.claude.com/docs/en/about-claude/pricing)
-    # Claude 5 family
-    # claude-sonnet-5: standard pricing from 2026-09-01 (platform.claude.com/docs/en/about-claude/pricing).
-    # Note: Sonnet 5 uses a new tokenizer (~30% more tokens vs Sonnet 4 for same text).
-    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
-    # Claude 4 family
-    "claude-opus-4-20250514": {"input": 5.00, "output": 25.00},
-    "claude-opus-4-6": {"input": 5.00, "output": 25.00},
-    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
-    # Google Gemini (ai.google.dev/gemini-api/docs/pricing)
-    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
-    # Groq (groq.com/pricing)
-    "llama-3.3-70b-versatile": {"input": 0.059, "output": 0.079},
-    "llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},
-    "mixtral-8x7b-32768": {"input": 0.24, "output": 0.24},
-    # DeepSeek V3.2 (api-docs.deepseek.com — unified pricing since Sep 2025)
-    "deepseek-chat": {"input": 0.28, "output": 0.42},
-    "deepseek-reasoner": {"input": 0.28, "output": 0.42},
-    # xAI (docs.x.ai/developers/models)
-    "grok-3": {"input": 3.00, "output": 15.00},
-    "grok-3-mini": {"input": 0.30, "output": 0.50},
-    # Mistral (mistral.ai/pricing)
-    "mistral-large-latest": {"input": 2.00, "output": 6.00},
-    "mistral-small-latest": {"input": 0.07, "output": 0.20},
-    "codestral-latest": {"input": 0.30, "output": 0.90},
-    # Perplexity
-    "sonar-pro": {"input": 3.00, "output": 15.00},
-    "sonar": {"input": 1.00, "output": 1.00},
-    # Together / Fireworks / SambaNova (Meta Llama hosted)
-    "meta-llama/Llama-3.3-70B-Instruct-Turbo": {"input": 0.88, "output": 0.88},
-    # Ollama / local — zero cost
-    "llama3.3": {"input": 0.0, "output": 0.0},
-    "ollama/llama3.3": {"input": 0.0, "output": 0.0},
-    "qwen3": {"input": 0.0, "output": 0.0},
-    "ollama/qwen3": {"input": 0.0, "output": 0.0},
-    "phi-4": {"input": 0.0, "output": 0.0},
-    "ollama/phi-4": {"input": 0.0, "output": 0.0},
-    "gemma3": {"input": 0.0, "output": 0.0},
-    "ollama/gemma3": {"input": 0.0, "output": 0.0},
-    # ── Embedding models ──
-    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
-    "text-embedding-3-large": {"input": 0.13, "output": 0.0},
-    "text-embedding-ada-002": {"input": 0.10, "output": 0.0},
-    "text-embedding-004": {"input": 0.00, "output": 0.0},  # Google free tier
-    "mistral-embed": {"input": 0.10, "output": 0.0},
-    "nomic-embed-text": {"input": 0.0, "output": 0.0},  # local
-    "mxbai-embed-large": {"input": 0.0, "output": 0.0},  # local
-}
+# Pricing data is loaded at startup from data/pricing.yaml via SignatureStore
+# (set_model_pricing). Edit that file to add or update model prices — changes
+# are hot-reloaded every 30 s without a proxy restart.
+MODEL_PRICING: Dict[str, Dict[str, float]] = {}
 
 # Default fallback for unknown models
 _DEFAULT_PRICING = {"input": 1.00, "output": 3.00}
