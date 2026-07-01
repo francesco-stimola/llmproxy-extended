@@ -25,11 +25,13 @@ in italiano e in inglese nella stessa frase.
 
 **Prompt**
 ```
+Ti fornisco i miei dati di contatto e quelli della mia collega, confermami
+di averli ricevuti ripetendoli uno per uno in un elenco puntato:
+
 Mi chiamo Pinco Pallino e la mia collega si chiama Futura Incognita
 (my name is Pinco Pallino, her name is Futura Incognita).
-Puoi inviarmi i risultati a pinco.pallino@prova.invalid oppure chiamarmi al +39 333 0000001.
-Il mio IBAN per i rimborsi è IT00A0000000000000000000001.
-Detto questo, puoi spiegarmi la differenza tra una lista e un dizionario in Python?
+La mia email è pinco.pallino@prova.invalid, il telefono è +39 333 0000001
+e il mio IBAN per i rimborsi è IT00A0000000000000000000001.
 ```
 
 **Expected log**
@@ -37,9 +39,9 @@ Detto questo, puoi spiegarmi la differenza tra una lista e un dizionario in Pyth
 PII masked: [ACCOUNT_NUMBER, PRIVATE_EMAIL, PRIVATE_PERSON, PRIVATE_PHONE] — 4 category(ies) [DEBUG: output NOT de-masked]
 ```
 
-**Pass condition** — `[PRIVATE_PERSON_1]`, `[PRIVATE_PERSON_2]`, `[PRIVATE_EMAIL_1]`,
-`[PRIVATE_PHONE_1]`, `[ACCOUNT_NUMBER_1]` compaiono nella risposta. Claude risponde
-comunque alla domanda Python. Nessun valore reale nell'output.
+**Pass condition** — La risposta è un elenco puntato che riporta esattamente
+`[PRIVATE_PERSON_1]`, `[PRIVATE_PERSON_2]`, `[PRIVATE_EMAIL_1]`, `[PRIVATE_PHONE_1]`,
+`[ACCOUNT_NUMBER_1]` al posto dei valori reali. Nessun dato in chiaro nell'output.
 
 ---
 
