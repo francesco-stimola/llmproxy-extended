@@ -321,7 +321,7 @@ class OnnxPiiMasker(BasePlugin):
                     f"({e['score']:.2f})"
                     for e in sorted(raw_entities, key=lambda x: x["start"])
                 )
-                self.logger.debug(
+                self.logger.info(
                     "[DEBUG] msg[%s] detected: %s | text: %s…",
                     role, entities_summary, preview,
                 )
@@ -337,7 +337,7 @@ class OnnxPiiMasker(BasePlugin):
                 any_masked = True
                 if self._debug_input_only:
                     role = msg.get("role", "?")
-                    self.logger.debug(
+                    self.logger.info(
                         "[DEBUG] msg[%s] after masking: %s…",
                         role, masked[:120].replace("\n", " "),
                     )
