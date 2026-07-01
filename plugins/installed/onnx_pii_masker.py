@@ -14,7 +14,9 @@ Placeholder format: [GROUP_N]  e.g. [PRIVATE_PERSON_1], [PRIVATE_EMAIL_2]
 Consistency: within a single request, the same value always gets the same
 placeholder (reverse_index). Across requests the vault handles re-mapping.
 
-Requirements: onnxruntime>=1.18.0  transformers>=4.40.0  huggingface-hub>=0.20.0
+Requirements: onnxruntime>=1.18.0  tokenizers>=0.19.0  huggingface-hub>=0.20.0
+  (does NOT import `transformers` or `torch` — uses the Rust `tokenizers` library
+   directly to avoid torch being loaded as a side-effect of transformers.__init__)
 Model must be pre-downloaded locally: huggingface-cli download openai/privacy-filter
 """
 from typing import Any
@@ -48,12 +50,13 @@ def _strippable(ch: str) -> bool:
 class _OnnxClassifier:
     """Minimal token-classification runner over a raw ONNX Runtime session.
 
-    We cannot use transformers' pipeline + optimum here: the model needs
-    transformers>=5 for its custom architecture, while optimum's ONNX bridge
-    pins transformers<4.58 — mutually exclusive. We tokenize with the fast
-    tokenizer, run the ONNX graph directly, and return one entity dict per
-    non-O token with char offsets. _merge_consecutive then stitches adjacent
-    tokens exactly like the torch aggregation_strategy="simple" path does.
+    Uses the `tokenizers` (Rust) library directly instead of `transformers`
+    to avoid importing torch as a side-effect of transformers.__init__.
+    The fast tokenizer loaded from tokenizer.json behaves identically to
+    AutoTokenizer: same vocab, same CLS/SEP post-processor, same offsets.
+
+    Token-level entities are stitched into spans by _merge_consecutive,
+    mirroring transformers' aggregation_strategy="simple" behaviour.
     """
 
     def __init__(self, session: Any, tokenizer: Any, id2label: dict[int, str]) -> None:
@@ -64,30 +67,31 @@ class _OnnxClassifier:
     def __call__(self, text: str) -> list[dict]:
         import numpy as np
 
-        enc = self.tok(
-            text,
-            return_offsets_mapping=True,
-            return_tensors="np",
-            truncation=True,
-        )
-        offsets = enc["offset_mapping"][0]
+        # tokenizers Rust library: encode() returns an Encoding with
+        # .ids, .attention_mask, .offsets (list of (start, end) char tuples).
+        # add_special_tokens=True prepends CLS and appends SEP by default.
+        enc = self.tok.encode(text)
+        ids_arr = np.array([enc.ids], dtype="int64")
+        attn_arr = np.array([enc.attention_mask], dtype="int64")
+        offsets = enc.offsets  # List[Tuple[int, int]]
+
         feeds = {
-            "input_ids": enc["input_ids"].astype("int64"),
-            "attention_mask": enc["attention_mask"].astype("int64"),
+            "input_ids": ids_arr,
+            "attention_mask": attn_arr,
         }
         logits = self.session.run(["logits"], feeds)[0][0]  # (seq_len, num_labels)
-        ids = logits.argmax(-1)
+        label_ids = logits.argmax(-1)
         m = logits.max(-1, keepdims=True)
         ex = np.exp(logits - m)
         probs = ex / ex.sum(-1, keepdims=True)
 
         ents = []
-        for i, lab_id in enumerate(ids):
+        for i, lab_id in enumerate(label_ids):
             label = self.id2label[int(lab_id)]
             if label == "O":
                 continue
             start, end = int(offsets[i][0]), int(offsets[i][1])
-            if start == end:  # special token (CLS / SEP / pad)
+            if start == end:  # special token (CLS / SEP / pad) — offset is (0,0)
                 continue
             group = label.split("-", 1)[-1]  # strip B-/I-/E-/S- prefix
             ents.append({
@@ -164,12 +168,13 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.0.0"
+    version = "1.1.0"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
         "PRIVATE_PERSON, PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_ADDRESS, PRIVATE_URL, "
-        "PRIVATE_DATE, ACCOUNT_NUMBER, SECRET. Replaces Presidio default masker."
+        "PRIVATE_DATE, ACCOUNT_NUMBER, SECRET. Replaces Presidio default masker. "
+        "Uses tokenizers (Rust) directly — does not import transformers or torch."
     )
     # NER inference: 50–300 ms per message on CPU; allow generous headroom.
     timeout_ms = 2000
@@ -192,9 +197,12 @@ class OnnxPiiMasker(BasePlugin):
             )
 
     def _build_classifier(self) -> tuple[_OnnxClassifier, str]:
+        import json
         import onnxruntime as ort
         from huggingface_hub import hf_hub_download
-        from transformers import AutoConfig, AutoTokenizer
+        # Use `tokenizers` (Rust library) directly — avoids importing `transformers`
+        # which would trigger torch import via transformers.__init__ backend detection.
+        from tokenizers import Tokenizer as _HFTokenizer  # noqa: PLC0415
 
         model_id: str = self.config.get("model_id", MODEL_ID)
         variant: str = self.config.get("variant", "int8")
@@ -222,10 +230,26 @@ class OnnxPiiMasker(BasePlugin):
 
         self.logger.info(f"Loading ONNX model {model_id} [{variant}] via {backend}")
         local_path = hf_hub_download(model_id, onnx_file, local_files_only=True)
-        tok = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
-        conf = AutoConfig.from_pretrained(model_id, local_files_only=True)
+
+        # Load id2label mapping from config.json (plain JSON, no transformers needed)
+        config_path = hf_hub_download(model_id, "config.json", local_files_only=True)
+        with open(config_path, encoding="utf-8") as f:
+            config_data = json.load(f)
+        id2label: dict[int, str] = {
+            int(k): v for k, v in config_data["id2label"].items()
+        }
+
+        # Load tokenizer from tokenizer.json using the Rust tokenizers library.
+        # This is identical in output to AutoTokenizer.from_pretrained() for fast
+        # tokenizers — same vocab, same CLS/SEP post-processor, same char offsets.
+        # max_length from model config; default 512 for BERT-family models.
+        max_len: int = int(config_data.get("max_position_embeddings", 512))
+        tok_path = hf_hub_download(model_id, "tokenizer.json", local_files_only=True)
+        tok = _HFTokenizer.from_file(tok_path)
+        tok.enable_truncation(max_length=max_len)
+
         sess = ort.InferenceSession(local_path, providers=providers)
-        return _OnnxClassifier(sess, tok, conf.id2label), backend
+        return _OnnxClassifier(sess, tok, id2label), backend
 
     async def execute(self, ctx: PluginContext) -> PluginResponse:
         if self._classifier is None:
