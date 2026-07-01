@@ -108,8 +108,7 @@ senza toccare tabelle reali. Tutte le 5 categorie PII in un singolo test.
 
 **Prompt**
 ```
-Elenca le connessioni database disponibili, scegli la prima e connettiti.
-Poi esegui questa query:
+Connettiti a un database disponibile e poi esegui questa query:
 
 SELECT
   'Pinco Pallino'                                       AS nome_cognome,
@@ -183,8 +182,8 @@ molte righe. Usa `CONNECT BY LEVEL` su DUAL per generare dati senza toccare tabe
 
 **Prompt**
 ```
-Elenca le connessioni database disponibili, scegli la prima e connettiti.
-Poi esegui questa query e dimmi quante righe ha restituito e qual è la distribuzione degli stati:
+Connettiti a un database disponibile e poi esegui questa query.
+Dimmi quante righe ha restituito e qual è la distribuzione degli stati:
 
 SELECT
   level                                                                AS id,
