@@ -144,21 +144,24 @@ plugins:
   - name: "Headroom Compressor"
     hook: "pre_flight"
     priority: 25
-    # Disabled by default: saves ~2-3 GB RAM (Kompress ML model + deps).
-    # Enable when you need context compression on long conversations.
-    # Requirement: pip install "headroom-ai[ml,code]"
-    # Trade-off: ~12% token reduction on real conversations; first pass
-    # takes 15-17 s on CPU — subsequent passes on the same content are instant.
-    enabled: false
+    # use_kompress: false — structural compression only (SmartCrusher for JSON/tool
+    # outputs, LogCompressor, SearchCompressor). Kompress ML model (ModernBERT ONNX,
+    # torch ~2 GB RAM) is NOT loaded. Fast, deterministic, no model download needed.
+    #
+    # Set use_kompress: true to enable ML compression (~12% additional reduction on
+    # prose/general text). Requires: pip install "headroom-ai[ml,code]" and accepts
+    # 15-17 s on the first compression pass.
+    enabled: true
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.headroom_compressor:HeadroomCompressor"
-    version: "1.1.0"
+    version: "1.2.0"
     author: "llmproxy-extended"
-    description: "Context compression via headroom-ai. Runs after ONNX PII masking. Requires: pip install headroom-ai[ml,code]"
+    description: "Context compression via headroom-ai. use_kompress=false: structural only, no torch. use_kompress=true: full ML. Requires: pip install headroom-ai[ml,code]"
     timeout_ms: 30000
     config:
       min_tokens_to_compress: 200
+      use_kompress: false
     ui_schema:
       - key: "min_tokens_to_compress"
         type: "number"
@@ -167,6 +170,11 @@ plugins:
         default: 200
         min: 50
         max: 2000
+      - key: "use_kompress"
+        type: "boolean"
+        label: "Use Kompress ML"
+        description: "Enable Kompress (ModernBERT ONNX) for text compression. Loads torch (~2 GB RAM). Set false for structural-only compression (SmartCrusher, LogCompressor) without ML."
+        default: false
 
   # ── ROUTING ────────────────────────────────────────────────────────────────
 

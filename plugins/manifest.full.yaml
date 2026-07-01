@@ -191,12 +191,13 @@ plugins:
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.headroom_compressor:HeadroomCompressor"
-    version: "1.1.0"
+    version: "1.2.0"
     author: "llmproxy-extended"
-    description: "Context compression via headroom-ai (60-95% token reduction). Runs after ONNX PII masking. Requires: pip install headroom-ai[ml,code]"
-    timeout_ms: 10000
+    description: "Context compression via headroom-ai (60-95% token reduction). use_kompress=true: full ML pipeline (Kompress ModernBERT). Requires: pip install headroom-ai[ml,code]"
+    timeout_ms: 30000
     config:
       min_tokens_to_compress: 200
+      use_kompress: true
     ui_schema:
       - key: "min_tokens_to_compress"
         type: "number"
@@ -205,6 +206,11 @@ plugins:
         default: 200
         min: 50
         max: 2000
+      - key: "use_kompress"
+        type: "boolean"
+        label: "Use Kompress ML"
+        description: "Enable Kompress (ModernBERT ONNX) for text compression. Loads torch (~2 GB RAM). Set false for structural-only compression without ML."
+        default: true
 
   # ── Optional Marketplace Plugins (disabled by default — opt-in) ──
 
