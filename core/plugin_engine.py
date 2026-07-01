@@ -131,6 +131,7 @@ ALLOWED_MODULES = {
     "onnxruntime",
     "numpy",
     "transformers",
+    "tokenizers",   # Rust BPE tokenizer — used by onnx_pii_masker instead of transformers
     "huggingface_hub",
     "headroom",
 }
@@ -458,6 +459,11 @@ class PluginManager:
                     meta=new_meta,
                     instances=new_instances,
                     stats=new_stats,
+                )
+            except PluginSecurityError as e:
+                self.logger.error(
+                    f"Plugin '{p_info.get('name')}' REJECTED by AST security scan: {e}. "
+                    "Add the required module to ALLOWED_MODULES in core/plugin_engine.py."
                 )
             except (
                 FileNotFoundError,
