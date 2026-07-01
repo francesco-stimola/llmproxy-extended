@@ -144,6 +144,7 @@ def _mask_text(
     vault: Any,
     reverse_index: dict,
     counters: dict,
+    debug: bool = False,
 ) -> str:
     """
     Replace detected entity spans with placeholders.
@@ -152,6 +153,10 @@ def _mask_text(
     reverse_index: (group, value_lower) → placeholder, shared across all
                    messages in the same request for consistency.
     counters:      group → current highest N, also shared per request.
+    debug:         when True, writes placeholder→placeholder (identity) to vault
+                   so the de-masker's replace loop is a no-op and the placeholder
+                   stays visible in the response. Also overwrites any stale vault
+                   entry from a previous request that had the same placeholder key.
     """
     entities = _merge_consecutive(raw_entities, max_gap=1)
     entities = sorted(entities, key=lambda e: e["start"], reverse=True)
@@ -175,7 +180,10 @@ def _mask_text(
             counters[group] = counters.get(group, 0) + 1
             placeholder = f"[{group}_{counters[group]}]"
             reverse_index[key] = placeholder
-            vault[placeholder] = original
+            # debug=True: identity mapping so de-masker replace is a no-op.
+            # Also overwrites stale vault entries from previous requests that
+            # would otherwise restore the real value through the same placeholder.
+            vault[placeholder] = placeholder if debug else original
 
         masked = masked[:start] + placeholder + masked[end:]
 
@@ -185,7 +193,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.1"
+    version = "1.2.2"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -291,9 +299,6 @@ class OnnxPiiMasker(BasePlugin):
             return PluginResponse.passthrough()
 
         vault = rotator.security.pii_vault
-        # In debug mode we use a throwaway dict instead of the real vault so
-        # the de-masker finds no entries and leaves placeholders in the response.
-        active_vault = {} if self._debug_input_only else vault
         reverse_index: dict = {}  # (group, value_lower) → placeholder
         counters: dict = {}       # group → current max N
 
@@ -307,12 +312,35 @@ class OnnxPiiMasker(BasePlugin):
             except Exception as exc:
                 self.logger.warning(f"Inference failed on message: {exc}")
                 continue
+
+            if self._debug_input_only and raw_entities:
+                role = msg.get("role", "?")
+                preview = content[:120].replace("\n", " ")
+                entities_summary = ", ".join(
+                    f"{e['entity_group']}={repr(e['word'])}@{e['start']}-{e['end']} "
+                    f"({e['score']:.2f})"
+                    for e in sorted(raw_entities, key=lambda x: x["start"])
+                )
+                self.logger.debug(
+                    "[DEBUG] msg[%s] detected: %s | text: %s…",
+                    role, entities_summary, preview,
+                )
+
             if not raw_entities:
                 continue
-            masked = _mask_text(content, raw_entities, active_vault, reverse_index, counters)
+            masked = _mask_text(
+                content, raw_entities, vault, reverse_index, counters,
+                debug=self._debug_input_only,
+            )
             if masked != content:
                 msg["content"] = masked
                 any_masked = True
+                if self._debug_input_only:
+                    role = msg.get("role", "?")
+                    self.logger.debug(
+                        "[DEBUG] msg[%s] after masking: %s…",
+                        role, masked[:120].replace("\n", " "),
+                    )
 
         if any_masked:
             ctx.metadata["pii_masked"] = True
