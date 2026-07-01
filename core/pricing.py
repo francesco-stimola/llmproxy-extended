@@ -31,9 +31,9 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "o4-mini": {"input": 1.10, "output": 4.40},
     # Anthropic (platform.claude.com/docs/en/about-claude/pricing)
     # Claude 5 family
-    # claude-sonnet-5: $2.00/$10.00 through 2026-08-31; $3.00/$15.00 from 2026-09-01.
+    # claude-sonnet-5: standard pricing from 2026-09-01 (platform.claude.com/docs/en/about-claude/pricing).
     # Note: Sonnet 5 uses a new tokenizer (~30% more tokens vs Sonnet 4 for same text).
-    "claude-sonnet-5": {"input": 2.00, "output": 10.00},
+    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
     # Claude 4 family
     "claude-opus-4-20250514": {"input": 5.00, "output": 25.00},
     "claude-opus-4-6": {"input": 5.00, "output": 25.00},
