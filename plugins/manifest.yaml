@@ -155,7 +155,7 @@ plugins:
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.headroom_compressor:HeadroomCompressor"
-    version: "1.2.0"
+    version: "1.3.0"
     author: "llmproxy-extended"
     description: "Context compression via headroom-ai. use_kompress=false: structural only, no torch. use_kompress=true: full ML. Requires: pip install headroom-ai[ml,code]"
     timeout_ms: 30000
