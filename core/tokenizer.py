@@ -111,6 +111,21 @@ def count_messages_tokens(messages: List[Dict[str, Any]], model: str = "") -> in
     return total
 
 
+def warmup() -> None:
+    """Pre-load the default BPE encoding into the cache.
+
+    Call this once at startup (e.g. from a plugin's on_load) so the first
+    real request does not pay the 1-3 s disk-load cold-start penalty.
+    """
+    if not _TIKTOKEN_AVAILABLE:
+        return
+    try:
+        _get_encoding("")  # loads _DEFAULT_ENCODING into _encoding_cache
+        logger.info("tiktoken encoding warmed up (cl100k_base cached)")
+    except Exception as exc:
+        logger.warning(f"tiktoken warmup failed (non-fatal): {exc}")
+
+
 def is_tiktoken_available() -> bool:
     """Check if tiktoken is installed."""
     return _TIKTOKEN_AVAILABLE

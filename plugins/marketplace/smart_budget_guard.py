@@ -214,6 +214,8 @@ class SmartBudgetGuard(BasePlugin):
             self._team_spend[team_key] += delta
 
     async def on_load(self):
+        from core.tokenizer import warmup as _tiktoken_warmup
+        _tiktoken_warmup()  # pre-load BPE encoding so first execute() doesn't cold-start
         self.logger.info(
             f"SmartBudgetGuard loaded: session=${self.session_budget_usd}, "
             f"team=${self.team_budget_usd}, warn@{self.warn_threshold:.0%}, "
