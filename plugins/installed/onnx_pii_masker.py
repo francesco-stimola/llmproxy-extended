@@ -19,6 +19,7 @@ Requirements: onnxruntime>=1.18.0  tokenizers>=0.19.0  huggingface-hub>=0.20.0
    directly to avoid torch being loaded as a side-effect of transformers.__init__)
 Model must be pre-downloaded locally: huggingface-cli download openai/privacy-filter
 """
+import re
 from typing import Any
 
 from core.plugin_sdk import BasePlugin, PluginHook, PluginResponse
@@ -37,6 +38,26 @@ VARIANTS: dict[str, str] = {
 # Only int8 produces output identical to CPU when running on DirectML.
 # Other variants may miss PII due to GPU/CPU round-trip divergence.
 DML_SAFE_VARIANTS: frozenset[str] = frozenset({"int8"})
+
+# Trigger-word regex for person names that NER misses in informal Italian/English
+# phrasing (e.g. "Ciao sono peppino cavallo" where int8 tokenizes "peppino" as
+# low-confidence subword fragments). Matches FirstName Surname after an introductory
+# phrase; negative lookahead prevents greedy over-capture into following words.
+_REGEX_PERSON_TRIGGERS = re.compile(
+    r"""
+    (?:
+        \b(?:sono|mi\s+chiamo|chiamami|nome\s+[eè]|mi\s+presento(?:\s+come)?|
+            presentarmi\s+come|parlando\s+con|parla\s+con|
+            I\s+am|my\s+name\s+is|I'm|call\s+me)
+        \s+
+    )
+    ([A-Za-zÀ-ÿ][a-zà-ÿ]{1,20}
+    \s+
+    [A-Za-zÀ-ÿ][a-zà-ÿ]{1,20})
+    (?!\s+[a-zà-ÿ])
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
 
 # Characters that the model sometimes absorbs into a span boundary but are
 # never a legitimate edge of a PII value (e.g. "customer=Mario" → strips "=").
@@ -138,6 +159,36 @@ def _merge_consecutive(entities: list[dict], max_gap: int = 1) -> list[dict]:
     return merged
 
 
+def _regex_person_entities(text: str) -> list[dict]:
+    """Trigger-word regex fallback: finds 'FirstName Surname' after introductory phrases."""
+    found = []
+    for m in _REGEX_PERSON_TRIGGERS.finditer(text):
+        found.append({
+            "entity_group": "PRIVATE_PERSON",
+            "start": m.start(1),
+            "end": m.end(1),
+            "word": m.group(1),
+            "score": 0.85,
+        })
+    return found
+
+
+def _dedup_by_span(entities: list[dict]) -> list[dict]:
+    """Largest span wins; discard any entity that overlaps with an already-accepted larger one.
+
+    Used to merge NER token fragments with regex full-name matches: regex typically
+    produces a clean 'peppino cavallo' span that supersedes fragmented NER subwords.
+    """
+    if not entities:
+        return []
+    by_size = sorted(entities, key=lambda e: e["end"] - e["start"], reverse=True)
+    accepted: list[dict] = []
+    for ent in by_size:
+        if not any(e["start"] < ent["end"] and ent["start"] < e["end"] for e in accepted):
+            accepted.append(ent)
+    return accepted
+
+
 def _mask_text(
     text: str,
     raw_entities: list[dict],
@@ -193,7 +244,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.3"
+    version = "1.2.4"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -295,27 +346,32 @@ class OnnxPiiMasker(BasePlugin):
         counters: dict,
         role: str,
     ) -> bool:
-        """Run NER on `text`, write masked result back to target[field].
+        """Run NER + regex person fallback on `text`, write masked result back to target[field].
         Returns True if any entity was masked."""
         try:
-            raw_entities = self._classifier(text)
+            ner_entities = self._classifier(text)
         except Exception as exc:
             self.logger.warning(f"Inference failed on {role}/{field}: {exc}")
             return False
-        if not raw_entities:
+
+        regex_entities = _regex_person_entities(text)
+        # Dedup: largest span wins — regex full-name match supersedes NER subword fragments.
+        all_entities = _dedup_by_span(ner_entities + regex_entities)
+
+        if not all_entities:
             return False
 
         if self._debug_input_only:
             entities_summary = ", ".join(
                 f"{e['entity_group']}={repr(e['word'])}@{e['start']}-{e['end']} ({e['score']:.2f})"
-                for e in sorted(raw_entities, key=lambda x: x["start"])
+                for e in sorted(all_entities, key=lambda x: x["start"])
             )
             self.logger.info(
                 "[DEBUG] msg[%s].%s detected: %s | text: %s…",
                 role, field, entities_summary, text[:120].replace("\n", " "),
             )
 
-        masked = _mask_text(text, raw_entities, vault, reverse_index, counters,
+        masked = _mask_text(text, all_entities, vault, reverse_index, counters,
                             debug=self._debug_input_only)
         if masked == text:
             return False
