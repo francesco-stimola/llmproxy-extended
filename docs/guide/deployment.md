@@ -4,7 +4,18 @@
 
 ### RAM
 
-Memory usage with the default plugin stack (ONNX PII Masker + Headroom Compressor + Kompress):
+Two configurations depending on `use_kompress` in `plugins/manifest.yaml`:
+
+**Structural only (`use_kompress: false`) — recommended for RAM-constrained hosts:**
+
+| Component | RAM (WorkingSet) |
+|---|---|
+| ONNX PII Masker — `openai/privacy-filter` int8 | ~1 600 MB |
+| Headroom structural compressors (SmartCrusher, LogCompressor) | ~10 MB |
+| Python / FastAPI / async runtime | ~170 MB |
+| **Total (observed, steady state)** | **~1 770 MB** |
+
+**Full ML (`use_kompress: true`) — default, best compression:**
 
 | Component | RAM (WorkingSet) |
 |---|---|
@@ -13,7 +24,7 @@ Memory usage with the default plugin stack (ONNX PII Masker + Headroom Compresso
 | Python / FastAPI / async runtime | ~160 MB |
 | **Total (observed, steady state)** | **~2 340 MB** |
 
-> **Task Manager caveat:** Windows Task Manager shows "Memory (private working set)" (~240 MB at idle), which excludes memory-mapped model files. The true physical RAM figure is the WorkingSet from `Get-Process` or Process Explorer — `~2.3 GB` after the first inference.
+> **Task Manager caveat (Windows):** Task Manager shows "Memory (private working set)" (~240 MB at idle), which excludes memory-mapped model files. The true physical RAM figure is the WorkingSet from `Get-Process` or Process Explorer — ~1.8 GB / ~2.3 GB after the first inference depending on config.
 
 Minimum recommended: **4 GB** free RAM (leaves headroom for Redis + OS).
 
