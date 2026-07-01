@@ -34,17 +34,34 @@ class HeadroomCompressor(BasePlugin):
         "Compresses the entire messages[] list after ONNX PII masking. "
         "Install: pip install headroom-ai[ml,code]"
     )
-    timeout_ms = 10000  # ML compression on large contexts can take several seconds
+    # 30 s: first-pass Kompress on CPU can take 15–17 s on 10k-token contexts.
+    timeout_ms = 30000
 
     def __init__(self, config: Any = None):
         super().__init__(config)
         self._compress = None
+        # _import_attempted prevents re-importing after a failed ImportError
+        self._import_attempted = False
 
     async def on_load(self) -> None:
+        # Intentionally skip eager import of headroom — the Kompress ML model
+        # (~1-2 GB RAM, possibly including PyTorch) loads when the library is
+        # first imported.  Deferring to execute() means the model only loads
+        # when a request actually meets the compression threshold, saving RAM
+        # on idle or low-volume instances.
+        self.logger.info(
+            "Headroom compressor registered (model loads on first qualifying request)"
+        )
+
+    def _try_import(self) -> None:
+        """Import headroom on the first execute() call that needs it."""
+        if self._import_attempted:
+            return
+        self._import_attempted = True
         try:
             from headroom import compress  # type: ignore[import]
             self._compress = compress
-            self.logger.info("Headroom compressor ready (headroom-ai)")
+            self.logger.info("Headroom: ML model loaded (first compression request)")
         except ImportError:
             self.logger.warning(
                 "headroom-ai not installed — plugin will passthrough. "
@@ -52,15 +69,13 @@ class HeadroomCompressor(BasePlugin):
             )
 
     async def execute(self, ctx: PluginContext) -> PluginResponse:
-        if self._compress is None:
-            return PluginResponse.passthrough()
-
         body = ctx.body
         messages = body.get("messages")
         if not messages:
             return PluginResponse.passthrough()
 
-        # Skip if total word count is below threshold (compression overhead > benefit)
+        # Skip early (before loading the model) if the context is too short.
+        # This is the main RAM-saving path: short requests never trigger the import.
         min_words: int = self.config.get("min_tokens_to_compress", 200)
         total_words = sum(
             len((m.get("content") or "").split())
@@ -71,6 +86,12 @@ class HeadroomCompressor(BasePlugin):
             self.logger.debug(
                 f"Skipping compression: {total_words} words < {min_words} threshold"
             )
+            return PluginResponse.passthrough()
+
+        # Lazy-load Kompress on the first request that actually needs compression
+        if self._compress is None:
+            self._try_import()
+        if self._compress is None:
             return PluginResponse.passthrough()
 
         model: str = body.get("model", "gpt-4o")
