@@ -37,9 +37,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
-          memory: 512M
+          memory: 2G
 
   redis:
     image: redis:7-alpine

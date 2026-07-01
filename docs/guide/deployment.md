@@ -1,5 +1,34 @@
 # Deployment
 
+## System Requirements
+
+### RAM
+
+Memory usage with the default plugin stack (ONNX PII Masker + Headroom Compressor + Kompress):
+
+| Component | RAM (WorkingSet) |
+|---|---|
+| ONNX PII Masker — `openai/privacy-filter` int8 | ~1 600 MB |
+| Headroom Kompress — `chopratejas/kompress-v2-base` ONNX | ~580 MB |
+| Python / FastAPI / async runtime | ~160 MB |
+| **Total (observed, steady state)** | **~2 340 MB** |
+
+> **Task Manager caveat:** Windows Task Manager shows "Memory (private working set)" (~240 MB at idle), which excludes memory-mapped model files. The true physical RAM figure is the WorkingSet from `Get-Process` or Process Explorer — `~2.3 GB` after the first inference.
+
+Minimum recommended: **4 GB** free RAM (leaves headroom for Redis + OS).
+
+### Disk
+
+ONNX model files (one-time download via `huggingface-cli`):
+
+| Model | Size on disk |
+|---|---|
+| `openai/privacy-filter` (int8 variant) | ~1.5 GB |
+| `chopratejas/kompress-v2-base` (headroom Kompress) | ~550 MB |
+| **Total** | **~2 GB** |
+
+---
+
 ## Docker Compose
 
 The recommended way to run LLMProxy in production:
@@ -53,6 +82,18 @@ All sensitive values are loaded via environment variables (with optional Infisic
 | `GOOGLE_API_KEY` | Google AI provider key |
 | `SENTRY_DSN` | Sentry error tracking |
 | `SLACK_WEBHOOK_URL` | Slack webhook for alerts |
+| `HEADROOM_DETECT_BACKEND` | `rust` or `python` — headroom content-type detection backend (see below) |
+
+### headroom Content Detection (`HEADROOM_DETECT_BACKEND`)
+
+headroom's `ContentRouter` detects the content type of each message (JSON, code, logs, plain text) to route it to the right compressor. Two backends:
+
+| Backend | How | Accuracy | Notes |
+|---|---|---|---|
+| `python` | Regex patterns | Lower | Default on Windows; always safe |
+| `rust` | Magika ML (compiled `.pyd`) | Higher | Correctly identifies JSON tool outputs, code blocks, log lines |
+
+Set `HEADROOM_DETECT_BACKEND=rust` in your `.env` for better compression routing. The only caveat on Windows: Magika's ONNX Runtime initializes a background thread on first use (one-time at startup, no per-request cost). No new packages required — `headroom._core.pyd` is included in `headroom-ai[ml,code]`.
 
 ## CI/CD
 
