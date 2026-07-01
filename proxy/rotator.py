@@ -451,7 +451,21 @@ class ProxyOrchestrator(BaseAgent):
             server_header=False,  # strip `Server: uvicorn` banner; security_headers middleware sets its own
         )
         server = uvicorn.Server(config)
-        await server.serve()
+        try:
+            await server.serve()
+        finally:
+            await self._shutdown()
+
+    async def _shutdown(self):
+        """Cancel background tasks and close open connections."""
+        self.logger.info("Cancelling %d background tasks…", len(self._background_tasks))
+        for task in list(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self.logger.info("HTTP session closed.")
 
     # ── Core Proxy Pipeline ──
 

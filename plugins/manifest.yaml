@@ -23,10 +23,10 @@ plugins:
   - name: "WAF-Aware Cache Lookup"
     hook: "pre_flight"
     priority: 30
-    enabled: true
+    enabled: false
     version: "1.0.0"
     entrypoint: "default.cache_check:lookup"
-    timeout_ms: 50
+    timeout_ms: 500
 
   - name: "Smart Router"
     hook: "routing"
@@ -121,7 +121,7 @@ plugins:
     version: "1.0.0"
     author: "llmproxy"
     description: "Pre-flight budget enforcement with cost estimation"
-    timeout_ms: 100
+    timeout_ms: 1000
     config:
       session_budget_usd: 5.0
       team_budget_usd: 100.0

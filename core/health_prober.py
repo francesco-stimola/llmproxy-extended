@@ -135,6 +135,24 @@ class EndpointHealthProber:
         ep_config = self.config.get("endpoints", {}).get(ep_name, {})
         api_key_env = ep_config.get("api_key_env", "")
         api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+
+        # Skip probing cloud endpoints whose key is not configured on the proxy.
+        # These endpoints operate in client-key passthrough mode: the real key
+        # arrives in the client's Authorization header at request time, not here.
+        # Probing without a key produces spurious 401s → report_failure() →
+        # circuit opens → all passthrough traffic is blocked. The circuit starts
+        # CLOSED by default; leaving it untouched is the correct behavior.
+        if api_key_env and not api_key:
+            if ep_name not in self._warned_unprobeable:
+                logger.info(
+                    "Probe skip: %s — '%s' not set in proxy env. "
+                    "Endpoint stays in pool for client-key passthrough.",
+                    ep_name,
+                    api_key_env,
+                )
+                self._warned_unprobeable.add(ep_name)
+            return
+
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

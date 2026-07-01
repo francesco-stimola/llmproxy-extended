@@ -333,6 +333,7 @@ def create_app(agent) -> FastAPI:
 
     from .routes import (
         admin_router,
+        messages_router,
         registry_router,
         identity_router,
         plugins_router,
@@ -345,6 +346,7 @@ def create_app(agent) -> FastAPI:
     )
 
     app.include_router(chat_router(agent))
+    app.include_router(messages_router(agent))
     app.include_router(completions_router(agent))
     app.include_router(embeddings_router(agent))
     app.include_router(models_router(agent))

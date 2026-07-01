@@ -13,6 +13,7 @@ from .models import create_router as models_router
 from .embeddings import create_router as embeddings_router
 from .completions import create_router as completions_router
 from .gdpr import create_router as gdpr_router
+from .messages import create_router as messages_router
 
 __all__ = [
     "admin_router",
@@ -25,4 +26,5 @@ __all__ = [
     "embeddings_router",
     "completions_router",
     "gdpr_router",
+    "messages_router",
 ]

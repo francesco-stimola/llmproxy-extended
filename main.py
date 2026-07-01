@@ -89,7 +89,11 @@ async def main():
 
 
 if __name__ == "__main__":
+    import os as _os
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Shutdown requested")
+        pass
+    finally:
+        logger.info("Shutdown complete")
+        _os._exit(0)
