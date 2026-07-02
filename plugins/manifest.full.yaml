@@ -115,13 +115,17 @@ plugins:
     hook: "pre_flight"
     priority: 11
     enabled: true
-    fail_policy: "closed"
+    # fail_policy: "open" — a timeout/error here should let the request through,
+    # not block it with a 403; budget is best-effort, not a security gate.
+    # timeout_ms raised 1000 -> 5000: 1000ms was too tight and caused spurious
+    # 403s under normal load (session budget checks + SQLite hydration).
+    fail_policy: "open"
     type: "python"
     entrypoint: "marketplace.smart_budget_guard:SmartBudgetGuard"
     version: "1.0.0"
     author: "llmproxy"
     description: "Pre-flight budget enforcement with cost estimation"
-    timeout_ms: 1000
+    timeout_ms: 5000
     config:
       session_budget_usd: 5.0
       team_budget_usd: 100.0

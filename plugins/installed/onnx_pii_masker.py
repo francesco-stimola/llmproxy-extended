@@ -19,6 +19,7 @@ Requirements: onnxruntime>=1.18.0  tokenizers>=0.19.0  huggingface-hub>=0.20.0
    directly to avoid torch being loaded as a side-effect of transformers.__init__)
 Model must be pre-downloaded locally: huggingface-cli download openai/privacy-filter
 """
+import asyncio
 import re
 from typing import Any
 
@@ -26,6 +27,31 @@ from core.plugin_sdk import BasePlugin, PluginHook, PluginResponse
 from core.plugin_engine import PluginContext
 
 MODEL_ID = "openai/privacy-filter"
+
+# Claude Code tool names that NER may misclassify as PRIVATE_PERSON when they
+# appear as prefixes in tool_result content (confirmed: "Bash <cmd>").
+# All 34 built-in tools are listed preventively; add new ones as discovered.
+_CLAUDE_CODE_TOOL_INVOCATIONS_NER_BYPASS: frozenset[str] = frozenset({
+    # shell / filesystem
+    "bash", "read", "write", "edit", "glob", "grep",
+    # agents / orchestration
+    "agent", "skill", "workflow",
+    # web
+    "websearch", "webfetch",
+    # task management
+    "todowrite", "monitor", "schedulewakeup",
+    "sendmessage", "taskstop", "taskoutput",
+    # IDE / planning
+    "enterplanmode", "exitplanmode",
+    "enterworktree", "exitworktree",
+    "designsync", "toolsearch",
+    "notebookedit", "reportfindings", "askuserquestion",
+    # cron / remote
+    "croncreate", "crondelete", "cronlist",
+    "remotetrigger", "pushnotification",
+    # MCP generics
+    "listmcpresourcestool", "readmcpresourcetool", "readmcpresourcedirtool",
+})
 
 VARIANTS: dict[str, str] = {
     "fp32":  "onnx/model.onnx",
@@ -214,6 +240,14 @@ def _mask_text(
                    entry from a previous request that had the same placeholder key.
     """
     entities = _merge_consecutive(raw_entities, max_gap=1)
+    # Drop PRIVATE_PERSON spans that match a known Claude Code tool name.
+    # See _CLAUDE_CODE_TOOL_INVOCATIONS_NER_BYPASS for the full list.
+    entities = [
+        e for e in entities
+        if e.get("entity_group", "").upper() != "PRIVATE_PERSON"
+        or text[e["start"]:e["end"]].strip().lower()
+        not in _CLAUDE_CODE_TOOL_INVOCATIONS_NER_BYPASS
+    ]
     entities = sorted(entities, key=lambda e: e["start"], reverse=True)
 
     masked = text
@@ -248,7 +282,7 @@ def _mask_text(
 class OnnxPiiMasker(BasePlugin):
     name = "onnx_pii_masker"
     hook = PluginHook.PRE_FLIGHT
-    version = "1.2.5"
+    version = "1.2.8"
     author = "llmproxy-extended"
     description = (
         "PII masking via OpenAI Privacy Filter (ONNX NER). Detects 8 categories: "
@@ -256,8 +290,19 @@ class OnnxPiiMasker(BasePlugin):
         "PRIVATE_DATE, ACCOUNT_NUMBER, SECRET. Replaces Presidio default masker. "
         "Uses tokenizers (Rust) directly — does not import transformers or torch."
     )
-    # NER inference: 50–300 ms per message on CPU; allow generous headroom.
-    timeout_ms = 2000
+    # NER inference: 50-300ms per short message on a fast CPU, but large
+    # system prompts (60-70KB+, several messages) plus CPU contention from
+    # concurrent requests (Kompress also runs ONNX inference in the same
+    # process) can push a full pass well past 10s on modest hardware
+    # (laptop, no dedicated inference accelerator). fail_policy=open means
+    # a timeout here silently lets PII through unmasked — worse than a slow
+    # response — so this stays generous rather than tight. 10000ms itself
+    # was already a correction: 2000ms looked safe only because
+    # plugin_engine's timeout_ms enforcement was silently broken for
+    # class-mode plugins until 2026-07-02 (fixed) — once truly enforced,
+    # 2000ms caused a TIMEOUT storm under concurrent load, tripping the
+    # circuit breaker and disabling PII masking entirely for 60s.
+    timeout_ms = 60000
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -352,6 +397,8 @@ class OnnxPiiMasker(BasePlugin):
     ) -> bool:
         """Run NER + regex person fallback on `text`, write masked result back to target[field].
         Returns True if any entity was masked."""
+        if self._classifier is None:
+            return False
         try:
             ner_entities = self._classifier(text)
         except Exception as exc:
@@ -388,6 +435,58 @@ class OnnxPiiMasker(BasePlugin):
             )
         return True
 
+    def _mask_messages(
+        self, messages: list, vault: Any, reverse_index: dict, counters: dict
+    ) -> bool:
+        """Synchronous NER + masking pass over every message. Call via
+        run_in_executor — ONNX inference is CPU-bound and, run inline inside
+        execute(), would block the asyncio event loop for the whole pass
+        (multi-second on large system prompts), freezing every other
+        concurrent request on the proxy for the same duration."""
+        any_masked = False
+        for msg in messages:
+            role = msg.get("role", "?")
+            content = msg.get("content")
+            if not content:
+                continue
+
+            if isinstance(content, str):
+                # Plain string content (system prompt, simple user/assistant messages)
+                any_masked |= self._mask_str_field(
+                    msg, "content", content, vault, reverse_index, counters, role
+                )
+            elif isinstance(content, list):
+                # Content block list — two block shapes handled:
+                #   {"type": "text", "text": "..."}
+                #   {"type": "tool_result", "content": str | [{type,text},...]}
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        text = block.get("text", "")
+                        if text:
+                            any_masked |= self._mask_str_field(
+                                block, "text", text, vault, reverse_index, counters, role
+                            )
+                    elif block_type == "tool_result":
+                        # File reads, bash output, MCP results — nested content may contain PII.
+                        nested = block.get("content")
+                        if isinstance(nested, str) and nested:
+                            any_masked |= self._mask_str_field(
+                                block, "content", nested, vault, reverse_index, counters, role
+                            )
+                        elif isinstance(nested, list):
+                            for nb in nested:
+                                if not isinstance(nb, dict) or nb.get("type") != "text":
+                                    continue
+                                nb_text = nb.get("text", "")
+                                if nb_text:
+                                    any_masked |= self._mask_str_field(
+                                        nb, "text", nb_text, vault, reverse_index, counters, role
+                                    )
+        return any_masked
+
     async def execute(self, ctx: PluginContext) -> PluginResponse:
         if self._classifier is None:
             return PluginResponse.passthrough()
@@ -405,30 +504,10 @@ class OnnxPiiMasker(BasePlugin):
         reverse_index: dict = {}  # (group, value_lower) → placeholder
         counters: dict = {}       # group → current max N
 
-        any_masked = False
-        for msg in messages:
-            role = msg.get("role", "?")
-            content = msg.get("content")
-            if not content:
-                continue
-
-            if isinstance(content, str):
-                # Plain string content (system prompt, simple user/assistant messages)
-                any_masked |= self._mask_str_field(
-                    msg, "content", content, vault, reverse_index, counters, role
-                )
-            elif isinstance(content, list):
-                # Content block list: [{"type": "text", "text": "..."}, ...]
-                # Used by Claude Code for user turns and tool results.
-                for block in content:
-                    if not isinstance(block, dict) or block.get("type") != "text":
-                        continue
-                    text = block.get("text", "")
-                    if not text:
-                        continue
-                    any_masked |= self._mask_str_field(
-                        block, "text", text, vault, reverse_index, counters, role
-                    )
+        loop = asyncio.get_event_loop()
+        any_masked = await loop.run_in_executor(
+            None, self._mask_messages, messages, vault, reverse_index, counters
+        )
 
         if any_masked:
             ctx.metadata["pii_masked"] = True

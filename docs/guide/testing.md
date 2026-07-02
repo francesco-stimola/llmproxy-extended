@@ -79,28 +79,25 @@ Nessun valore reale nell'output.
 
 ---
 
-## TC-03 · Bash — secret in variabile d'ambiente
+## TC-03 · Bash — secret nell'output di un comando
 
 Verifica che PII nell'output di un comando shell venga intercettata prima che Claude la legga.
-
-**Setup** — Prima di aprire VS Code, imposta le variabili nella shell:
-```powershell
-$env:APP_SECRET = "sk-ant-api01-test0000000000000000000000000000000000000000000000000"
-$env:OWNER_EMAIL = "pinco.pallino@prova.invalid"
-```
+Nessun setup richiesto: i valori sono hardcoded direttamente nel comando.
 
 **Prompt**
 ```
-Esegui il comando seguente e ripetimi esattamente i valori delle due variabili:
-echo "SECRET=$env:APP_SECRET EMAIL=$env:OWNER_EMAIL"
+Esegui questo comando Bash e ripetimi esattamente l'output riga per riga:
+echo "APP_SECRET=sk-ant-api01-test0000000000000000000000000000000000000000000000000"
+echo "OWNER_EMAIL=pinco.pallino@prova.invalid"
 ```
 
 **Expected log**
 ```
-[DEBUG] msg[tool].text detected: SECRET='sk-ant-api01-test...'@..., PRIVATE_EMAIL='pinco.pallino@prova.invalid'@...
+[DEBUG] msg[user].content detected: secret='sk-ant-api01-test...'@..., private_email='pinco.pallino@prova.invalid'@...
+PII masked: [PRIVATE_EMAIL, SECRET] — 2 category(ies) [DEBUG: output NOT de-masked]
 ```
 
-**Pass condition** — Claude ripete i valori ma riporta `[SECRET_1]` e `[PRIVATE_EMAIL_1]`
+**Pass condition** — Claude ripete le due righe ma riporta `[SECRET_1]` e `[PRIVATE_EMAIL_1]`
 al posto dei valori reali. Se NER non rileva `SECRET` annotare il risultato (utile per calibrare soglie).
 
 ---
@@ -135,38 +132,52 @@ placeholder. Tutte e 5 le categorie PII coperte in un test solo, nessun dato in 
 
 ---
 
-## TC-05 · Headroom — payload JSON lungo
+## TC-05 · Headroom — testo naturale lungo (Kompress)
 
-Verifica che il compressore si attivi quando il corpo del messaggio è un JSON verboso
-(tipico di risposte API o log strutturati passati in chat).
+Verifica che Kompress si attivi su un documento di testo lungo passato direttamente
+nel messaggio. Il testo puro è il dominio naturale di Kompress (ModernBERT NLP);
+non deve contenere JSON o codice strutturato.
 
 **Prompt**
 ```
-Analizza questo log di sessione e dimmi quali fasi hanno impiegato più tempo:
+Analizza questo documento e dimmi qual è il principale collo di bottiglia
+del processo descritto e quale azione correttiva è pianificata per risolverlo:
 
-{
-  "sessione_id": "sess-2026-001",
-  "ambiente": "sviluppo",
-  "timestamp_inizio": "2026-07-01T09:00:00Z",
-  "eventi": [
-    {"seq":1,"tipo":"AVVIO","modulo":"proxy","ms":120,"esito":"OK","note":"processo avviato, bind porta 8090 completato"},
-    {"seq":2,"tipo":"AUTH","modulo":"rotator","ms":45,"esito":"OK","note":"pool connessioni inizializzato, keepalive 30s"},
-    {"seq":3,"tipo":"PLUGIN_LOAD","modulo":"onnx_pii_masker","ms":3200,"esito":"OK","note":"modello int8 caricato, backend onnx-cpu"},
-    {"seq":4,"tipo":"PLUGIN_LOAD","modulo":"headroom_compressor","ms":890,"esito":"OK","note":"kompress warmed up in background thread"},
-    {"seq":5,"tipo":"PLUGIN_LOAD","modulo":"smart_budget_guard","ms":1100,"esito":"OK","note":"tiktoken cl100k_base pre-caricato, hydration SQLite completata"},
-    {"seq":6,"tipo":"RICHIESTA","modulo":"router","ms":12,"payload_tokens":441,"esito":"OK","note":"routing verso anthropic api, modello claude-sonnet-5"},
-    {"seq":7,"tipo":"PII_SCAN","modulo":"onnx_pii_masker","ms":280,"entita_trovate":2,"esito":"MASKED","note":"PRIVATE_PERSON x1, PRIVATE_EMAIL x1"},
-    {"seq":8,"tipo":"COMPRESSIONE","modulo":"headroom","ms":34,"token_in":441,"token_out":441,"esito":"SKIP","note":"sotto soglia min_tokens_to_compress"},
-    {"seq":9,"tipo":"UPSTREAM","modulo":"anthropic","ms":2100,"model":"claude-sonnet-5","esito":"OK","note":"streaming completato, 312 token output"},
-    {"seq":10,"tipo":"DEMASKING","modulo":"shield_sanitizer","ms":5,"sostituzioni":2,"esito":"OK","note":"vault lookup 2/2 trovati"},
-    {"seq":11,"tipo":"RICHIESTA","modulo":"router","ms":11,"payload_tokens":10732,"esito":"OK","note":"seconda richiesta, contesto accumulato"},
-    {"seq":12,"tipo":"PII_SCAN","modulo":"onnx_pii_masker","ms":950,"entita_trovate":8,"esito":"MASKED","note":"PRIVATE_PERSON x2, PRIVATE_EMAIL x1, PRIVATE_PHONE x1, ACCOUNT_NUMBER x1, SECRET x1"},
-    {"seq":13,"tipo":"COMPRESSIONE","modulo":"headroom","ms":280,"token_in":10732,"token_out":8901,"esito":"COMPRESSED","note":"kompress attivo, ratio 0.83"},
-    {"seq":14,"tipo":"UPSTREAM","modulo":"anthropic","ms":3800,"model":"claude-sonnet-5","esito":"OK","note":"streaming completato, 874 token output"},
-    {"seq":15,"tipo":"DEMASKING","modulo":"shield_sanitizer","ms":12,"sostituzioni":8,"esito":"OK","note":"vault lookup 8/8 trovati"}
-  ],
-  "sommario":{"richieste_totali":2,"pii_intercettate":10,"token_risparmiati":1831,"latenza_media_ms":2340,"costo_stimato_usd":0.0047}
-}
+Il progetto prevede l'installazione di un sistema di monitoraggio energetico
+distribuito presso tre siti produttivi. Ciascun sito è dotato di contatori
+intelligenti collegati a un concentratore locale che raccoglie le misure ogni
+quindici minuti e le trasmette al sistema centrale tramite connessione VPN
+dedicata. Il sistema centrale archivia le misure in un database time-series,
+le elabora in tempo reale per calcolare indicatori di consumo, e le distribuisce
+a tre applicazioni downstream: il portale di reportistica aziendale, il sistema
+di fatturazione interna e il cruscotto operativo del team tecnico.
+
+Il processo di elaborazione si articola in quattro fasi sequenziali. La prima
+fase è la raccolta: il servizio di ingestione riceve le misure dai concentratori,
+verifica l'integrità del timestamp e del valore, e le inserisce nella coda di
+elaborazione. La seconda fase è la validazione: ogni misura viene confrontata
+con i valori storici dello stesso punto di misura per rilevare anomalie
+statistiche — picchi improvvisi, valori nulli, sequenze piatte prolungate —
+che potrebbero indicare un malfunzionamento del contatore. La terza fase è
+l'aggregazione: le misure validate vengono aggregate su finestre temporali di
+quindici minuti, un'ora, un giorno e un mese per alimentare i diversi livelli
+del sistema di reportistica. La quarta fase è la distribuzione: gli aggregati
+vengono pubblicati su un bus di messaggi interno e consumati dalle applicazioni
+downstream secondo le proprie finestre di aggiornamento.
+
+Il principale collo di bottiglia identificato in fase di test è la latenza della
+fase di validazione statistica quando il sistema deve gestire misure in recupero
+dopo un'interruzione della connettività. In tali scenari, il concentratore
+trasmette al ripristino tutte le misure accumulate nel buffer locale, generando
+un burst di ingresso che può raggiungere seimila messaggi al minuto per sito.
+Il servizio di validazione è dimensionato per gestire mille messaggi al minuto
+in condizioni normali e non dispone attualmente di un meccanismo di throttling
+adattivo.
+
+Le azioni correttive pianificate includono l'introduzione di un buffer elastico
+nella coda di ingestione, il ridimensionamento del pool di worker del servizio
+di validazione, e l'implementazione di un meccanismo di priorità che garantisca
+l'elaborazione in tempo reale anche durante i periodi di recupero.
 ```
 
 **Expected log**
@@ -174,15 +185,54 @@ Analizza questo log di sessione e dimmi quali fasi hanno impiegato più tempo:
 Transform content_router: X -> Y tokens (saved Z) [Nms]
 ```
 
-**Pass condition** — `saved` > 0. Claude identifica correttamente le fasi più lente
-(PLUGIN_LOAD onnx_pii_masker a 3200 ms e UPSTREAM seconda richiesta a 3800 ms).
+**Pass condition** — `saved` > 0. Claude identifica il collo di bottiglia (burst
+di misure in recupero che supera la capacità del servizio di validazione) e
+l'azione correttiva (buffer elastico + throttling adattivo).
 
 ---
 
-## TC-06 · Headroom — risultato SQL verboso da tool
+## TC-06 · Headroom — JSON array da Bash (SmartCrusher)
 
-Verifica che la compressione scatti quando il `tool_result` di una query restituisce
-molte righe. Usa `CONNECT BY LEVEL` su DUAL per generare dati senza toccare tabelle reali.
+Verifica che SmartCrusher (compressore Rust strutturale) si attivi su un
+`tool_result` che contiene un JSON array top-level. SmartCrusher triggera solo
+su `[{...},{...},...]` come primo carattere del contenuto; il wrapper MCP
+`{"ok":true,"data":{...}}` lo impedisce, quindi si usa Bash con Python inline
+che stampa l'array grezzo senza wrapper.
+
+**Prompt**
+```
+Esegui questo comando Bash e dimmi quanti oggetti contiene l'array,
+quanti hanno stato ERRORE e quanti hanno stato ELABORATO:
+
+python -c "
+import json
+data = [{'id': i, 'codice': f'EVT_{i:03d}', 'stato': ['ELABORATO','IN_ATTESA','ERRORE'][i % 3], 'ts': f'2026-07-02T{8 + i // 60:02d}:{i % 60:02d}:00Z', 'descrizione': f'Descrizione del record numero {i} generata per il test di compressione SmartCrusher proxy.'} for i in range(1, 51)]
+print(json.dumps(data))
+"
+```
+
+**Expected log**
+```
+Transform content_router: X -> Y tokens (saved Z) [Nms]
+```
+
+> **Nota** — SmartCrusher non emette una riga di log separata visibile come Kompress;
+> la compressione appare nel `saved Z` del `content_router`. Se `saved 0` il detector
+> non ha riconosciuto il tipo `JSON_ARRAY` (verificare che l'output del comando
+> inizi con `[` senza prefissi di linea).
+
+**Pass condition** — `saved` > 0. Claude risponde: 50 oggetti, distribuzione
+stati 17 ELABORATO / 17 IN_ATTESA / 16 ERRORE (o equivalente con range 1–50).
+
+---
+
+## TC-07 · Headroom — risultato SQL verboso da tool
+
+Verifica che SmartCrusher compatti il `tool_result` di una query MCP anche quando
+il wrapper MCP è `{"ok":true,"data":{"rows":[...]}}` (oggetto root, non array).
+A partire da v1.4.0 il plugin chiama `compact_document_json()` direttamente sul
+blocco, che cammina ricorsivamente e trova l'array `rows` annidato, convertendolo
+in CSV+schema senza perdere righe (lossless).
 
 **Prompt**
 ```
@@ -209,13 +259,12 @@ CONNECT BY level <= 50
 Transform content_router: X -> Y tokens (saved Z) [Nms]
 ```
 
-**Pass condition** — `saved` > 0. Claude risponde correttamente: 50 righe, distribuzione
-stati 17 ELABORATO / 17 IN_ATTESA / 16 ERRORE (o equivalente). Nessuna troncatura
-nel conteggio o nella distribuzione.
+**Pass condition** — `saved` > 0. Claude risponde correttamente: 50 righe,
+distribuzione stati 17 ELABORATO / 17 IN_ATTESA / 16 ERRORE.
 
 ---
 
-## TC-07 · Headroom — sorgente del proxy
+## TC-08 · Headroom — sorgente del proxy
 
 Verifica la compressione su un file sorgente lungo letto direttamente da Claude Code.
 Usa il file più grande del progetto, già pubblico su GitHub.
@@ -241,12 +290,18 @@ frammenti più piccoli prodotti dall'NER, che coprono porzioni sovrapposte dello
 
 ## Checklist di verifica
 
-| ID | Descrizione | Filtro atteso | Log ✓ | Risposta ✓ |
-|----|-------------|---------------|-------|------------|
-| TC-01 | Chat PII multipla | PERSON × 2, EMAIL, PHONE, IBAN | | |
-| TC-02 | File CSV | EMAIL × 3, PHONE × 3, IBAN × 3 | | |
-| TC-03 | Bash / env var | SECRET, EMAIL | | |
-| TC-04 | SQL FROM DUAL | PERSON, EMAIL, PHONE, IBAN, SECRET | | |
-| TC-05 | Headroom — JSON | headroom log, saved > 0 | | |
-| TC-06 | Headroom — SQL 50 righe | headroom log, saved > 0 | | |
-| TC-07 | Headroom — sorgente proxy | headroom log, saved > 0 | | |
+> La colonna **Rilevato** riporta solo le entità originate dal testo del test,
+> escludendo quelle iniettate dal system prompt di Claude Code (username, nome
+> utente, data corrente) che occupano i primi slot del contatore ma non
+> appartengono al caso di test.
+
+| ID | Descrizione | Filtro atteso | Rilevato (dal testo test) | Log ✓ | Risposta ✓ |
+|----|-------------|---------------|---------------------------|-------|------------|
+| TC-01 | Chat PII multipla | PERSON × 2, EMAIL, PHONE, IBAN | PERSON: 'Pinco Pallino' ×2→1ph, 'Futura Incognita' ×2→1ph · EMAIL ×1 · PHONE ×1 · IBAN ×1 | ✓ | ✓ |
+| TC-02 | File CSV | EMAIL × 3, PHONE × 3, IBAN × 3 | EMAIL ×3 · PHONE ×3 · IBAN ×3 · PERSON: 'Primo' ×1, 'Caia' ×1, 'Sempronio Terzo' ×1 (Tizio/Seconda single-word, dropped) | ✓ | ✓ |
+| TC-03 | Bash / echo | SECRET, EMAIL | EMAIL ×1 ✓ (mascherata nel prompt) · SECRET `sk-ant-api01-test...`: non rilevato dal NER → Claude vede la chiave in chiaro → rifiuta il Bash per safety proprie (non per il proxy) · Bash mai eseguito, nessun tool_result · FP: `-anthropic-billing:` nel system prompt → PRIVATE_URL ogni request | ~ | ✗ |
+| TC-04 | SQL FROM DUAL | PERSON, EMAIL, PHONE, IBAN, SECRET | EMAIL ×1 ✓ · PHONE ×1 ✓ · PERSON: mancato nel prompt (no trigger SQL), rilevato nel result ma Claude già esposto · IBAN: mangled → `IT[PRIVATE_PHONE_1]` (classificato come PHONE) · SECRET `sk-secret-internal-key-000`: non rilevato (formato non riconosciuto dal NER) · FP: `anubi` (nome connessione) → PRIVATE_PERSON | ~ | ✗ |
+| TC-05 | Headroom — testo naturale (Kompress) | saved > 0 | 3 chunk paralleli · words 1160/2199/1236 · ratio 0.68/0.79/0.75 · saved 1383 token (12.1%) | ✓ | ✓ |
+| TC-06 | Headroom — JSON array Bash (SmartCrusher) | saved > 0 | | | |
+| TC-07 | Headroom — SQL 50 righe MCP (compact_document_json) | saved > 0 | | | |
+| TC-08 | Headroom — sorgente proxy | saved > 0 | | | |

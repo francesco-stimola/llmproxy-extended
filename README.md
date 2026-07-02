@@ -8,6 +8,48 @@ Fork of [fabriziosalmi/llmproxy](https://github.com/fabriziosalmi/llmproxy) exte
 
 ---
 
+## Known Issues / Project Status
+
+This fork works end-to-end, but manual testing (see link below) surfaced
+several unresolved problems in PII detection accuracy and pipeline behavior
+under real concurrent load. Documented as of 2026-07-02, still open:
+
+- **SECRET category is unreliable.** The NER model did not detect any tested
+  API-key-shaped secret (`sk-ant-api01-*`, `sk-secret-*`) — it passes through
+  in clear text. Do not rely on this masker for credential redaction.
+- **IBAN can be misclassified.** Digits after the country prefix are
+  sometimes tagged `PRIVATE_PHONE` instead of `ACCOUNT_NUMBER`, producing a
+  mangled placeholder (e.g. `IT[PRIVATE_PHONE_1]`).
+- **Person names need a trigger phrase.** Names embedded in structured text
+  (e.g. SQL string literals) without a natural-language cue ("mi chiamo...",
+  "my name is...") are often missed entirely.
+- **False positives on non-PII tokens.** DB connection names, tool names, and
+  header fragments (`x-anthropic-billing-header`) have been misclassified as
+  `PRIVATE_PERSON` / `PRIVATE_URL`. A hardcoded allowlist mitigates the known
+  Claude Code tool names but is not a general fix.
+- **Timeouts had to be raised well above the original defaults** (PII masker
+  2000ms → 60000ms, Headroom 25000ms → 130000ms) to stop the plugin circuit
+  breaker from quarantining the PII masker under normal load on a laptop CPU.
+  A `plugin_engine.py` bug that silently ignored manifest-level `timeout_ms`
+  for class-based plugins made earlier tuning attempts no-ops until it was
+  found and fixed mid-session — a sign this path had not been exercised
+  under real timing before.
+- **SmartCrusher only compresses root-level JSON arrays automatically.** MCP
+  tool results (`{"ok":true,"data":{...}}`) needed a manual
+  `compact_document_json()` pre-processing step added on top, because the
+  content-type router doesn't walk nested structures by default.
+
+Taken together, this points at more surface area (NER + regex fallback +
+Kompress ML + SmartCrusher + budget/loop/circuit-breaker guards, all
+interacting) than is comfortable to keep correct and predictable. A future
+rewrite — smaller scope, one thing done well — is more likely than continued
+patching of this codebase.
+
+See [docs/guide/testing.md](docs/guide/testing.md) for the manual test suite
+and the checklist of what has actually been verified so far.
+
+---
+
 ## What's new in this fork
 
 The original llmproxy uses Microsoft Presidio (spaCy `en_core_web_sm`) for PII detection. This fork replaces it with the **OpenAI Privacy Filter** — a transformer NER model fine-tuned specifically on PII data — and adds optional context compression via Headroom.

@@ -610,6 +610,14 @@ class PluginManager:
             # If target is a function → legacy raw function mode
             if inspect.isclass(target) and issubclass(target, BasePlugin):
                 instance = target(config=config)
+                # Manifest timeout_ms (when explicitly set) overrides the class
+                # default so operators can tune timeouts without editing plugin
+                # source. Only applied when the key is present — falling back to
+                # DEFAULT_TIMEOUT_MS here would silently clamp plugins that rely
+                # on a deliberately-tuned class default but omit timeout_ms from
+                # their manifest entry.
+                if "timeout_ms" in p_info:
+                    instance.timeout_ms = p_info["timeout_ms"]
                 await instance.on_load()
                 instances[name] = instance
                 rings[hook].append(

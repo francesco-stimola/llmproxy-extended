@@ -22,46 +22,9 @@ plugins:
 
   # ── PRE_FLIGHT ─────────────────────────────────────────────────────────────
 
-  - name: "Smart Budget Guard"
-    hook: "pre_flight"
-    priority: 11
-    enabled: true
-    fail_policy: "closed"
-    type: "python"
-    entrypoint: "marketplace.smart_budget_guard:SmartBudgetGuard"
-    version: "1.0.0"
-    author: "llmproxy"
-    description: "Pre-flight budget enforcement with cost estimation"
-    timeout_ms: 2000
-    config:
-      session_budget_usd: 5.0
-      team_budget_usd: 100.0
-      cost_per_1k_input: 0.003
-      cost_per_1k_output: 0.015
-      avg_output_ratio: 0.5
-      warn_threshold: 0.8
-    ui_schema:
-      - key: "session_budget_usd"
-        type: "number"
-        label: "Session Budget ($)"
-        description: "Maximum spend per session in USD"
-        default: 5.0
-        min: 0.1
-        max: 1000
-      - key: "team_budget_usd"
-        type: "number"
-        label: "Team Budget ($)"
-        description: "Maximum spend per team/API key in USD"
-        default: 100.0
-        min: 1
-        max: 100000
-      - key: "warn_threshold"
-        type: "number"
-        label: "Warning Threshold"
-        description: "Warn at this fraction of budget (0.0 - 1.0)"
-        default: 0.8
-        min: 0.5
-        max: 0.99
+  # Smart Budget Guard — not needed in personal single-user mode (no spend cap
+  # to enforce against yourself). Full config lives in manifest.full.yaml;
+  # copy the block back here to opt in for team/multi-key usage.
 
   - name: "Agentic Loop Breaker"
     hook: "pre_flight"
@@ -118,10 +81,17 @@ plugins:
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.onnx_pii_masker:OnnxPiiMasker"
-    version: "1.2.5"
+    version: "1.2.8"
     author: "llmproxy-extended"
     description: "PII masking via OpenAI Privacy Filter NER (ONNX) + regex person-name fallback. 8 categories: PRIVATE_PERSON, PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_ADDRESS, PRIVATE_URL, PRIVATE_DATE, ACCOUNT_NUMBER, SECRET."
-    timeout_ms: 2000
+    # v1.2.8: NER inference now runs via run_in_executor (was blocking the asyncio
+    # event loop synchronously — see headroom_compressor.py v1.4.0 for the same fix
+    # and full rationale). timeout_ms now actually enforced too (plugin_engine.py
+    # bug fix, 2026-07-02) — raised 2000 -> 10000 -> 60000: even 10000ms still
+    # timed out routinely on laptop-class CPU under concurrent load (large
+    # system prompt + Kompress competing for the same cores). fail_policy=open
+    # means a timeout here lets PII through unmasked, so generous > tight.
+    timeout_ms: 60000
     config:
       model_id: "openai/privacy-filter"
       variant: "int8"
@@ -152,14 +122,30 @@ plugins:
     #
     # Set use_kompress: false for structural-only (SmartCrusher, LogCompressor,
     # SearchCompressor) — no Kompress model, instant, zero-ML, ~0 extra RAM.
+    #
+    # v1.4.0: JSON-object tool_result pre-processing via SmartCrusher.compact_document_json().
+    # MCP results wrapped in {"ok":true,"data":{...}} are now compacted before
+    # ContentRouter runs, filling the routing gap for non-array JSON root content.
+    #
+    # timeout_ms: previously 5000, but plugin_engine.py silently ignored manifest
+    # timeout_ms for class-mode plugins (bug fixed 2026-07-02 — see plugin_engine.py
+    # timeout_ms override note), so the real enforced value was always the class
+    # default. Compress calls also now run via run_in_executor (headroom_
+    # compressor.py v1.4.0), so a slow Kompress inference no longer blocks the
+    # event loop / other concurrent requests — a generous timeout is now safe
+    # (it used to mean a frozen server; now it just means a slower response).
+    # Set to 130000 to sit above Kompress's own internal wall-clock deadline
+    # (HEADROOM_COMPRESSION_DEADLINE_MS in .env, raised to 120000 for laptop-
+    # class CPUs — see .env.example) so our plugin timeout never cuts Kompress
+    # off before its own deadline does.
     enabled: true
     fail_policy: "open"
     type: "python"
     entrypoint: "installed.headroom_compressor:HeadroomCompressor"
-    version: "1.3.0"
+    version: "1.4.0"
     author: "llmproxy-extended"
     description: "Context compression via headroom-ai. use_kompress=false: structural only, no torch. use_kompress=true: full ML. Requires: pip install headroom-ai[ml,code]"
-    timeout_ms: 30000
+    timeout_ms: 130000
     config:
       min_tokens_to_compress: 200
       use_kompress: true
