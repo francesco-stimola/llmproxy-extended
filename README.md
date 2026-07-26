@@ -8,6 +8,17 @@ Fork of [fabriziosalmi/llmproxy](https://github.com/fabriziosalmi/llmproxy) exte
 
 ---
 
+## ⚠️ Deprecated
+
+This project is deprecated in favor of
+[llm-proxy-pii-rust](https://github.com/francesco-stimola/llm-proxy-pii-rust), a from-scratch
+Rust rewrite. It does not include Headroom — context compression was dropped from scope on
+purpose, so the project can focus on doing one thing well: masking PII locally before it
+leaves the machine, and restoring it in the response. No further development is planned here;
+the sections below are kept for historical reference.
+
+---
+
 ## Known Issues / Project Status
 
 This fork works end-to-end, but manual testing (see link below) surfaced
